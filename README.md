@@ -51,9 +51,9 @@ python_service/service.py --addr 127.0.0.1:9091
 - `VISION_ADDR`：Python 服务地址，默认 `127.0.0.1:9091`
 - `PYTHON`：指定 Python 解释器
 - `SKIP_PYTHON_SERVICE=1`：不自动拉起 Python 服务
-- `FONTMAN_MAX_CANDIDATES`：单次匹配最多粗排候选数，默认 `80`
+- `FONTMAN_MAX_CANDIDATES`：单次匹配最多粗排候选数，默认 `0` 表示全量
 - `FONTMAN_MATCH_WORKERS`：Python 字体评分线程数，默认 `min(8, CPU 核心数)`
-- `FONTMAN_FINE_CANDIDATES`：进入精排对齐搜索的候选数，默认 `10`
+- `FONTMAN_FINE_CANDIDATES`：进入精排对齐搜索的候选数，默认 `0` 表示粗排结果全量精排
 
 ## 使用流程
 

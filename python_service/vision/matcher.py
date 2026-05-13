@@ -17,8 +17,8 @@ class FontMatcher:
     def __init__(self, index: FontIndex, previews_dir: Path) -> None:
         self.index = index
         self.previews_dir = previews_dir
-        self.max_candidates = int(os.getenv("FONTMAN_MAX_CANDIDATES", "80"))
-        self.fine_candidates = int(os.getenv("FONTMAN_FINE_CANDIDATES", "10"))
+        self.max_candidates = int(os.getenv("FONTMAN_MAX_CANDIDATES", "0"))
+        self.fine_candidates = int(os.getenv("FONTMAN_FINE_CANDIDATES", "0"))
         self.max_workers = int(os.getenv("FONTMAN_MATCH_WORKERS", str(min(8, os.cpu_count() or 4))))
         self.engine = FontMatchEngine(max_workers=self.max_workers)
         self._can_render_cache: dict[tuple[str, str], bool] = {}
@@ -39,7 +39,7 @@ class FontMatcher:
         self.emit(progress, "candidates", 0, len(candidates), f"{len(candidates)} candidates selected")
 
         coarse = self.engine.coarse_rank(candidates, target, text, progress=progress)
-        fine_records = [item["record"] for item in coarse[: self.fine_candidates]]
+        fine_records = [item["record"] for item in coarse[: self.fine_candidates]] if self.fine_candidates > 0 else [item["record"] for item in coarse]
         fine = self.engine.fine_rank(fine_records, target, text, progress=progress)
 
         results = [self.to_result(item, text) for item in fine[:top_k]]
@@ -71,7 +71,7 @@ class FontMatcher:
                 self.index.save_can_render(record, text, can_render)
             if can_render:
                 filtered.append(record)
-            if len(filtered) >= self.max_candidates:
+            if self.max_candidates > 0 and len(filtered) >= self.max_candidates:
                 break
         return filtered
 
