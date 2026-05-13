@@ -35,7 +35,7 @@ class FontMatcher:
         require_cv2()
         started = time.time()
         target = self.engine.prepare_target(crop)
-        candidates = self.filter_candidates(text)
+        candidates = self.filter_candidates(text, progress=progress)
         self.emit(progress, "candidates", 0, len(candidates), f"{len(candidates)} candidates selected")
 
         coarse = self.engine.coarse_rank(candidates, target, text, progress=progress)
@@ -50,7 +50,11 @@ class FontMatcher:
             "warning": "" if fine else "No scoreable fonts found. Check text, fonts, and image dependencies.",
         }
 
-    def filter_candidates(self, text: str) -> list[FontRecord]:
+    def filter_candidates(
+        self,
+        text: str,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> list[FontRecord]:
         kind = classify_text(text)
         records = self.index.records()
         if kind == "english":
@@ -58,7 +62,9 @@ class FontMatcher:
         elif kind == "cjk":
             records = [r for r in records if "\u4e2d\u6587" in r.category]
         filtered: list[FontRecord] = []
-        for record in records:
+        total = len(records)
+        next_emit = 0
+        for idx, record in enumerate(records, start=1):
             cache_key = (record.path, text)
             if cache_key in self._can_render_cache:
                 can_render = self._can_render_cache[cache_key]
@@ -71,6 +77,16 @@ class FontMatcher:
                 self.index.save_can_render(record, text, can_render)
             if can_render:
                 filtered.append(record)
+            percent = int(idx * 100 / max(1, total))
+            if percent >= next_emit or idx == total:
+                self.emit(
+                    progress,
+                    "filtering",
+                    idx,
+                    total,
+                    f"filtering {idx}/{total}, {len(filtered)} usable",
+                )
+                next_emit = percent + 3
             if self.max_candidates > 0 and len(filtered) >= self.max_candidates:
                 break
         return filtered

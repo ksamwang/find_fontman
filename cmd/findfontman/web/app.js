@@ -139,7 +139,19 @@ function updateProgress(payload) {
     return;
   }
   const percent = Math.round((payload.done / payload.total) * 100);
-  setStatus(`${payload.phase}: ${payload.done}/${payload.total} (${percent}%)`);
+  const phase = phaseLabel(payload.phase);
+  const extra = payload.message && payload.message !== payload.phase ? ` - ${payload.message}` : "";
+  setStatus(`${phase}: ${payload.done}/${payload.total} (${percent}%)${extra}`);
+}
+
+function phaseLabel(phase) {
+  return ({
+    filtering: "Filtering fonts",
+    candidates: "Candidates",
+    coarse: "Coarse search",
+    fine: "Fine alignment",
+    start: "Starting",
+  })[phase] || phase;
 }
 
 function closeProgress() {
