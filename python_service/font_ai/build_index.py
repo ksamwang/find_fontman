@@ -20,11 +20,16 @@ def build_index(args: argparse.Namespace) -> None:
     root = Path(args.root).resolve()
     fonts_dir = resolve_fonts_dir(root, args.fonts)
     paths = AIPaths(root=root, fonts=fonts_dir, data=Path(args.data).resolve())
-    metadata = read_metadata(paths.metadata)
-    records = metadata["fonts"]
-    texts = metadata["texts"]
     device = torch.device(args.device if args.device else ("cuda" if torch.cuda.is_available() else "cpu"))
     ckpt = torch.load(paths.checkpoint, map_location=device)
+    if "records" in ckpt and "texts" in ckpt:
+        records = ckpt["records"]
+        texts = ckpt["texts"]
+        metadata = {"fonts": records, "texts": texts}
+    else:
+        metadata = read_metadata(paths.metadata)
+        records = metadata["fonts"]
+        texts = metadata["texts"]
     model = create_model(num_classes=int(ckpt["num_classes"])).to(device)
     model.load_state_dict(ckpt["model"])
     model.eval()

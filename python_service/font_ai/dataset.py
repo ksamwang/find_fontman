@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import random
 from pathlib import Path
+from typing import Callable
 
 from .config import DEFAULT_TEXTS
 from .deps import Dataset, require_torch
@@ -40,17 +41,33 @@ class FontRenderDataset(BaseDataset):
         return image_to_tensor(image), font_idx
 
 
-def scan_font_records(fonts_dir: Path, limit: int = 0, texts: list[str] | None = None) -> list[dict]:
+def scan_font_records(
+    fonts_dir: Path,
+    limit: int = 0,
+    texts: list[str] | None = None,
+    progress: Callable[[dict], None] | None = None,
+    log_every: int = 100,
+) -> list[dict]:
     texts = texts or DEFAULT_TEXTS
     records = []
+    scanned = 0
+    skipped = 0
     for path in sorted(fonts_dir.rglob("*")):
         if path.suffix.lower() not in {".ttf", ".otf", ".ttc"}:
             continue
+        scanned += 1
         if not any(can_render(str(path), text) for text in texts[:3]):
+            skipped += 1
+            if progress and scanned % log_every == 0:
+                progress({"event": "font_scan_progress", "scanned": scanned, "accepted": len(records), "skipped": skipped})
             continue
         records.append({"path": str(path), "name": path.stem, "category": fonts_dir.name})
+        if progress and scanned % log_every == 0:
+            progress({"event": "font_scan_progress", "scanned": scanned, "accepted": len(records), "skipped": skipped})
         if limit > 0 and len(records) >= limit:
             break
+    if progress:
+        progress({"event": "font_scan_done", "scanned": scanned, "accepted": len(records), "skipped": skipped})
     return records
 
 
