@@ -3,7 +3,5 @@ numpy>=2.3,<2.4
 opencv-python>=4.13,<4.14
 paddlepaddle>=3.3,<3.4
 paddleocr>=3.5,<3.6
-
-# Optional but required for font_ai training/inference:
-# torch
-# torchvision
+torch>=2.12,<2.13
+torchvision>=0.27,<0.28
