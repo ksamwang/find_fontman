@@ -7,6 +7,7 @@
 - Go Web 服务：上传图片、框选区域、调用视觉服务、展示 Top10。
 - Python 视觉服务：字体索引、裁剪区域、PaddleOCR 接入、Pillow/NumPy 渲染评分。
 - 字体匹配任务：后台并发评分，前端通过 SSE 实时显示粗排/精排进度。
+- Top10 结果由 Python 直接返回字体预览图 `preview_base64`，Go 只做调试代理和透传。
 - 本地字体库：默认读取 `fonts/1中文简体`、`fonts/2中文繁体`、`fonts/4英文`。
 - 评分拆解：`ssim`、`iou`、`edge`、`shape` 和总分。
 

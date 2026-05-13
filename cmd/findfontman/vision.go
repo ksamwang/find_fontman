@@ -81,6 +81,17 @@ func (v *VisionClient) Check(ctx context.Context) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("vision health status %d", resp.StatusCode)
 	}
+	var health struct {
+		Capabilities struct {
+			PreviewBase64 bool `json:"preview_base64"`
+		} `json:"capabilities"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil {
+		return err
+	}
+	if !health.Capabilities.PreviewBase64 {
+		return errors.New("vision service is missing preview_base64 capability")
+	}
 	return nil
 }
 

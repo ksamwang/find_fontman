@@ -29,6 +29,10 @@ class VisionService:
             "numpy": self._numpy_available(),
             "paddleocr": PaddleOCR is not None,
             "font_count": self.index.count(),
+            "capabilities": {
+                "match_tasks": True,
+                "preview_base64": True,
+            },
         }
 
     def analyze_crop(self, payload: dict[str, Any]) -> dict[str, Any]:

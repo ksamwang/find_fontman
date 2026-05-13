@@ -39,16 +39,18 @@ type scoreBreakdown struct {
 }
 
 type fontResult struct {
-	FontName     string         `json:"font_name"`
-	FontPath     string         `json:"font_path"`
-	ScoreTotal   float64        `json:"score_total"`
-	ScoreSSIM    float64        `json:"score_ssim"`
-	ScoreIOU     float64        `json:"score_iou"`
-	ScoreEdge    float64        `json:"score_edge"`
-	ScoreShape   float64        `json:"score_shape"`
-	PreviewPath  string         `json:"preview_path"`
-	PreviewURL   string         `json:"preview_url"`
-	ScoreDetails scoreBreakdown `json:"score_details"`
+	FontName      string         `json:"font_name"`
+	FontPath      string         `json:"font_path"`
+	ScoreTotal    float64        `json:"score_total"`
+	ScoreSSIM     float64        `json:"score_ssim"`
+	ScoreIOU      float64        `json:"score_iou"`
+	ScoreEdge     float64        `json:"score_edge"`
+	ScoreShape    float64        `json:"score_shape"`
+	PreviewPath   string         `json:"preview_path"`
+	PreviewBase64 string         `json:"preview_base64"`
+	PreviewMIME   string         `json:"preview_mime"`
+	PreviewURL    string         `json:"preview_url"`
+	ScoreDetails  scoreBreakdown `json:"score_details"`
 }
 
 type matchResponse struct {

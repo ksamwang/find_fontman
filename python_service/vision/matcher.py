@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import os
 import time
@@ -106,9 +107,9 @@ class FontMatcher:
         kind = classify_text(text)
         records = self.index.records()
         if kind == "english":
-            records = [r for r in records if "英文" in r.category]
+            records = [r for r in records if "\u82f1\u6587" in r.category]
         elif kind == "cjk":
-            records = [r for r in records if "中文" in r.category]
+            records = [r for r in records if "\u4e2d\u6587" in r.category]
         filtered: list[FontRecord] = []
         for record in records:
             cached = self.index.cached_can_render(record, text)
@@ -184,6 +185,7 @@ class FontMatcher:
 
     def to_result(self, item: dict[str, Any]) -> dict[str, Any]:
         rec = item["record"]
+        preview_path = item["preview_path"]
         return {
             "font_name": rec.name,
             "font_path": rec.path,
@@ -192,8 +194,14 @@ class FontMatcher:
             "score_iou": round(item["score_iou"], 6),
             "score_edge": round(item["score_edge"], 6),
             "score_shape": round(item["score_shape"], 6),
-            "preview_path": item["preview_path"],
+            "preview_path": preview_path,
+            "preview_base64": self.preview_base64(Path(preview_path)),
+            "preview_mime": "image/png",
         }
+
+    def preview_base64(self, path: Path) -> str:
+        with path.open("rb") as file:
+            return base64.b64encode(file.read()).decode("ascii")
 
     def emit(
         self,

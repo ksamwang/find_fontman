@@ -200,7 +200,7 @@ function renderResults(payload) {
     <article class="result-card">
       <strong>${idx + 1}. ${escapeHTML(item.font_name)}</strong>
       <div class="score">Score ${formatScore(item.score_total)}</div>
-      ${item.preview_url ? `<img class="preview" src="${item.preview_url}" alt="">` : ""}
+      ${previewImage(item)}
       <div class="metric-grid">
         <span>SSIM ${formatScore(item.score_ssim)}</span>
         <span>IoU ${formatScore(item.score_iou)}</span>
@@ -209,6 +209,17 @@ function renderResults(payload) {
       </div>
     </article>
   `).join("");
+}
+
+function previewImage(item) {
+  if (item.preview_base64) {
+    const mime = item.preview_mime || "image/png";
+    return `<img class="preview" src="data:${mime};base64,${item.preview_base64}" alt="">`;
+  }
+  if (item.preview_url) {
+    return `<img class="preview" src="${item.preview_url}" alt="">`;
+  }
+  return "";
 }
 
 function postJSON(url, payload) {

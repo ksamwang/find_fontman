@@ -44,6 +44,8 @@ message FontMatchResult {
   double score_edge = 6;
   double score_shape = 7;
   string preview_path = 8;
+  string preview_base64 = 9;
+  string preview_mime = 10;
 }
 
 message MatchFontsResponse {
