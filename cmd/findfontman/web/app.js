@@ -15,11 +15,12 @@ let imageID = "";
 let selection = null;
 let dragging = false;
 let dragStart = null;
+let progressSource = null;
 
 fileInput.addEventListener("change", async () => {
   const file = fileInput.files?.[0];
   if (!file) return;
-  setStatus("上传中...");
+  setStatus("Uploading...");
   const data = new FormData();
   data.append("image", file);
   const res = await fetch("/api/upload", { method: "POST", body: data });
@@ -37,7 +38,7 @@ fileInput.addEventListener("change", async () => {
   candidateInfo.textContent = "";
   analyzeBtn.disabled = true;
   matchBtn.disabled = true;
-  setStatus("拖拽框选文字区域");
+  setStatus("Drag to select a text region");
 });
 
 window.addEventListener("resize", fitCanvasToImage);
@@ -62,7 +63,7 @@ canvas.addEventListener("pointerup", () => {
   if (selection && selection.w > 6 && selection.h > 6) {
     analyzeBtn.disabled = false;
     matchBtn.disabled = textInput.value.trim() === "";
-    setStatus("已选择区域，可 OCR 或手动输入文本");
+    setStatus("Region selected. Run OCR or enter text manually");
   }
 });
 
@@ -72,32 +73,81 @@ textInput.addEventListener("input", () => {
 
 analyzeBtn.addEventListener("click", async () => {
   if (!selection) return;
-  setStatus("OCR 识别中...");
+  setStatus("Running OCR...");
   const res = await postJSON("/api/analyze", { image_id: imageID, box: selection });
   if (!res.ok) return setError(await res.text());
   const payload = await res.json();
   textInput.value = payload.text || "";
   matchBtn.disabled = textInput.value.trim() === "";
-  setStatus(payload.warning || `OCR 完成，置信度 ${formatScore(payload.confidence)}`);
+  setStatus(payload.warning || `OCR done, confidence ${formatScore(payload.confidence)}`);
 });
 
 matchBtn.addEventListener("click", async () => {
   if (!selection) return;
-  setStatus("匹配中...");
+  closeProgress();
+  setStatus("Starting match...");
   resultList.innerHTML = "";
   candidateInfo.textContent = "";
-  const res = await postJSON("/api/match", {
+  matchBtn.disabled = true;
+  const res = await postJSON("/api/match/start", {
     image_id: imageID,
     box: selection,
     text: textInput.value.trim(),
     top_k: Number(topKInput.value || 10),
   });
-  if (!res.ok) return setError(await res.text());
+  if (!res.ok) {
+    matchBtn.disabled = false;
+    return setError(await res.text());
+  }
   const payload = await res.json();
-  renderResults(payload);
-  const took = payload.elapsed_ms ? `${payload.elapsed_ms}ms` : "";
-  setStatus(payload.warning || `完成 ${took}`);
+  subscribeProgress(payload.task_id);
 });
+
+function subscribeProgress(taskID) {
+  progressSource = new EventSource(`/api/match/events/${encodeURIComponent(taskID)}`);
+  progressSource.onmessage = (event) => {
+    const payload = JSON.parse(event.data);
+    if (payload.type === "heartbeat") return;
+    if (payload.type === "progress") {
+      updateProgress(payload);
+      return;
+    }
+    if (payload.type === "done") {
+      closeProgress();
+      renderResults(payload.result);
+      const took = payload.result?.elapsed_ms ? `${payload.result.elapsed_ms}ms` : "";
+      setStatus(payload.result?.warning || `Done ${took}`);
+      matchBtn.disabled = false;
+      return;
+    }
+    if (payload.type === "error") {
+      closeProgress();
+      setError(payload.error || "Match failed");
+      matchBtn.disabled = false;
+    }
+  };
+  progressSource.onerror = () => {
+    closeProgress();
+    setError("Progress stream disconnected");
+    matchBtn.disabled = false;
+  };
+}
+
+function updateProgress(payload) {
+  if (!payload.total) {
+    setStatus(payload.message || payload.phase);
+    return;
+  }
+  const percent = Math.round((payload.done / payload.total) * 100);
+  setStatus(`${payload.phase}: ${payload.done}/${payload.total} (${percent}%)`);
+}
+
+function closeProgress() {
+  if (progressSource) {
+    progressSource.close();
+    progressSource = null;
+  }
+}
 
 function fitCanvasToImage() {
   if (!sourceImage.src) return;
@@ -143,13 +193,13 @@ function drawSelection() {
 function renderResults(payload) {
   candidateInfo.textContent = `${payload.candidate_size || 0} candidates`;
   if (!payload.results?.length) {
-    resultList.innerHTML = "<p>没有匹配结果。请确认文本和字体库。</p>";
+    resultList.innerHTML = "<p>No font match results. Check the text and font library.</p>";
     return;
   }
   resultList.innerHTML = payload.results.map((item, idx) => `
     <article class="result-card">
       <strong>${idx + 1}. ${escapeHTML(item.font_name)}</strong>
-      <div class="score">总分 ${formatScore(item.score_total)}</div>
+      <div class="score">Score ${formatScore(item.score_total)}</div>
       ${item.preview_url ? `<img class="preview" src="${item.preview_url}" alt="">` : ""}
       <div class="metric-grid">
         <span>SSIM ${formatScore(item.score_ssim)}</span>

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"io"
@@ -83,26 +84,10 @@ func (a *App) handleMatch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	var req matchRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	payload, ok := a.matchPayload(w, r)
+	if !ok {
 		return
 	}
-	req.Text = strings.TrimSpace(req.Text)
-	if req.Text == "" {
-		http.Error(w, "text is required", http.StatusBadRequest)
-		return
-	}
-	if req.TopK <= 0 || req.TopK > 50 {
-		req.TopK = 10
-	}
-	imagePath, err := a.imagePath(req.ImageID)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	payload := map[string]any{"image_path": imagePath, "box": req.Box, "text": req.Text, "top_k": req.TopK}
 	var out matchResponse
 	if err := a.Vision.Call(r.Context(), "/match", payload, &out); err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
@@ -120,6 +105,83 @@ func (a *App) handleMatch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, out)
+}
+
+func (a *App) handleMatchStart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	payload, ok := a.matchPayload(w, r)
+	if !ok {
+		return
+	}
+	var out matchStartResponse
+	if err := a.Vision.Call(r.Context(), "/match/start", payload, &out); err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, out)
+}
+
+func (a *App) handleMatchEvents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	taskID := strings.TrimPrefix(r.URL.Path, "/api/match/events/")
+	if taskID == "" || strings.Contains(taskID, "/") {
+		http.Error(w, "invalid task id", http.StatusBadRequest)
+		return
+	}
+	resp, err := a.Vision.Stream(r.Context(), "/match/events/"+taskID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		http.Error(w, strings.TrimSpace(string(msg)), http.StatusBadGateway)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		_, _ = w.Write(scanner.Bytes())
+		_, _ = w.Write([]byte("\n"))
+		flusher.Flush()
+	}
+}
+
+func (a *App) matchPayload(w http.ResponseWriter, r *http.Request) (map[string]any, bool) {
+	var req matchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return nil, false
+	}
+	req.Text = strings.TrimSpace(req.Text)
+	if req.Text == "" {
+		http.Error(w, "text is required", http.StatusBadRequest)
+		return nil, false
+	}
+	if req.TopK <= 0 || req.TopK > 50 {
+		req.TopK = 10
+	}
+	imagePath, err := a.imagePath(req.ImageID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return nil, false
+	}
+	return map[string]any{"image_path": imagePath, "box": req.Box, "text": req.Text, "top_k": req.TopK}, true
 }
 
 func (a *App) imagePath(id string) (string, error) {

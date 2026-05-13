@@ -6,6 +6,7 @@
 
 - Go Web 服务：上传图片、框选区域、调用视觉服务、展示 Top10。
 - Python 视觉服务：字体索引、裁剪区域、PaddleOCR 接入、Pillow/NumPy 渲染评分。
+- 字体匹配任务：后台并发评分，前端通过 SSE 实时显示粗排/精排进度。
 - 本地字体库：默认读取 `fonts/1中文简体`、`fonts/2中文繁体`、`fonts/4英文`。
 - 评分拆解：`ssim`、`iou`、`edge`、`shape` 和总分。
 
@@ -49,6 +50,7 @@ python_service/service.py --addr 127.0.0.1:9091
 - `PYTHON`：指定 Python 解释器
 - `SKIP_PYTHON_SERVICE=1`：不自动拉起 Python 服务
 - `FONTMAN_MAX_CANDIDATES`：单次匹配最多粗排候选数，默认 `200`
+- `FONTMAN_MATCH_WORKERS`：Python 字体评分线程数，默认 `min(8, CPU 核心数)`
 
 ## 使用流程
 

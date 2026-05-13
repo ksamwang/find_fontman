@@ -48,11 +48,11 @@ class VisionService:
         text, confidence = self.ocr.recognize(crop_path)
         return {"text": text, "confidence": confidence, "crop_url": str(crop_path)}
 
-    def match_fonts(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def match_fonts(self, payload: dict[str, Any], progress=None) -> dict[str, Any]:
         text = str(payload.get("text", "")).strip()
         top_k = int(payload.get("top_k") or 10)
         crop = self.crop(Path(payload["image_path"]), payload["box"])
-        return self.matcher.match(crop, text, top_k)
+        return self.matcher.match(crop, text, top_k, progress=progress)
 
     def crop(self, image_path: Path, raw_box: dict[str, Any]) -> Any:
         require_pillow()

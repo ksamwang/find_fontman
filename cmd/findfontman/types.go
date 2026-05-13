@@ -57,3 +57,7 @@ type matchResponse struct {
 	ElapsedMS     int64        `json:"elapsed_ms"`
 	Warning       string       `json:"warning,omitempty"`
 }
+
+type matchStartResponse struct {
+	TaskID string `json:"task_id"`
+}

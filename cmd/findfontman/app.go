@@ -58,6 +58,8 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("/api/upload", a.handleUpload)
 	mux.HandleFunc("/api/analyze", a.handleAnalyze)
 	mux.HandleFunc("/api/match", a.handleMatch)
+	mux.HandleFunc("/api/match/start", a.handleMatchStart)
+	mux.HandleFunc("/api/match/events/", a.handleMatchEvents)
 	mux.Handle("/uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir(a.UploadDir))))
 	mux.Handle("/previews/", http.StripPrefix("/previews/", http.FileServer(http.Dir(a.PreviewDir))))
 	return mux

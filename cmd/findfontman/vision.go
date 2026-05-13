@@ -111,6 +111,17 @@ func (v *VisionClient) Call(ctx context.Context, path string, payload any, out a
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
+func (v *VisionClient) Stream(ctx context.Context, path string) (*http.Response, error) {
+	if err := v.app.StartVisionService(); err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, v.BaseURL+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	return http.DefaultClient.Do(req)
+}
+
 func logVisionExit(err error) {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "python vision service exited: %v\n", err)

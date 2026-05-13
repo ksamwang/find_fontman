@@ -3,8 +3,9 @@ from __future__ import annotations
 import hashlib
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .deps import Image, ImageDraw, ImageFilter, ImageFont, require_numpy, require_pillow
 from .font_index import FontIndex, FontRecord
@@ -16,33 +17,35 @@ class FontMatcher:
         self.index = index
         self.previews_dir = previews_dir
         self.max_candidates = int(os.getenv("FONTMAN_MAX_CANDIDATES", "200"))
+        self.max_workers = int(os.getenv("FONTMAN_MATCH_WORKERS", str(min(8, os.cpu_count() or 4))))
 
-    def match(self, crop: Any, text: str, top_k: int) -> dict[str, Any]:
+    def match(
+        self,
+        crop: Any,
+        text: str,
+        top_k: int,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
         require_pillow()
         require_numpy()
         started = time.time()
         target = prepare_target(crop)
         candidates = self.filter_candidates(text)
+        self.emit(progress, "candidates", 0, len(candidates), f"{len(candidates)} candidates selected")
 
-        coarse: list[dict[str, Any]] = []
-        for rec in candidates:
-            try:
-                rendered = self.render_for_target(rec.path, text, target["size"], fast=True)
-                coarse.append({"record": rec, **self.score(target, rendered)})
-            except Exception:
-                continue
+        coarse = self.score_many(candidates, target, text, fast=True, phase="coarse", progress=progress)
         coarse.sort(key=lambda item: item["score_total"], reverse=True)
 
-        fine: list[dict[str, Any]] = []
-        for item in coarse[:100]:
-            rec = item["record"]
-            try:
-                rendered = self.render_for_target(rec.path, text, target["size"], fast=False)
-                scores = self.score(target, rendered)
-                preview_path = self.save_preview(rendered["image"], rec, text, scores["score_total"])
-                fine.append({"record": rec, "preview_path": str(preview_path), **scores})
-            except Exception:
-                continue
+        fine_records = [item["record"] for item in coarse[:100]]
+        fine = self.score_many(
+            fine_records,
+            target,
+            text,
+            fast=False,
+            phase="fine",
+            progress=progress,
+            save_preview=True,
+        )
         fine.sort(key=lambda item: item["score_total"], reverse=True)
 
         return {
@@ -51,6 +54,53 @@ class FontMatcher:
             "elapsed_ms": int((time.time() - started) * 1000),
             "warning": "" if fine else "No scoreable fonts found. Check text, fonts, and image dependencies.",
         }
+
+    def score_many(
+        self,
+        records: list[FontRecord],
+        target: dict[str, Any],
+        text: str,
+        fast: bool,
+        phase: str,
+        progress: Callable[[dict[str, Any]], None] | None,
+        save_preview: bool = False,
+    ) -> list[dict[str, Any]]:
+        results: list[dict[str, Any]] = []
+        total = len(records)
+        if total == 0:
+            return results
+        done = 0
+        next_emit = 0
+        with ThreadPoolExecutor(max_workers=max(1, self.max_workers)) as pool:
+            futures = [pool.submit(self.score_one, rec, target, text, fast, save_preview) for rec in records]
+            for future in as_completed(futures):
+                done += 1
+                item = future.result()
+                if item is not None:
+                    results.append(item)
+                percent = int(done * 100 / total)
+                if percent >= next_emit or done == total:
+                    self.emit(progress, phase, done, total, f"{phase} {done}/{total}")
+                    next_emit = percent + 5
+        return results
+
+    def score_one(
+        self,
+        rec: FontRecord,
+        target: dict[str, Any],
+        text: str,
+        fast: bool,
+        save_preview: bool,
+    ) -> dict[str, Any] | None:
+        try:
+            rendered = self.render_for_target(rec.path, text, target["size"], fast=fast)
+            scores = self.score(target, rendered)
+            item: dict[str, Any] = {"record": rec, **scores}
+            if save_preview:
+                item["preview_path"] = str(self.save_preview(rendered["image"], rec, text, scores["score_total"]))
+            return item
+        except Exception:
+            return None
 
     def filter_candidates(self, text: str) -> list[FontRecord]:
         kind = classify_text(text)
@@ -144,6 +194,18 @@ class FontMatcher:
             "score_shape": round(item["score_shape"], 6),
             "preview_path": item["preview_path"],
         }
+
+    def emit(
+        self,
+        progress: Callable[[dict[str, Any]], None] | None,
+        phase: str,
+        done: int,
+        total: int,
+        message: str,
+    ) -> None:
+        if progress is None:
+            return
+        progress({"phase": phase, "done": done, "total": total, "message": message})
 
 
 def classify_text(text: str) -> str:
