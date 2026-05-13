@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -57,15 +58,35 @@ func (a *App) StartVisionService() error {
 		logVisionExit(err)
 	}()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), visionStartTimeout())
 	defer cancel()
+	var lastErr error
 	for ctx.Err() == nil {
-		if a.Vision.Check(ctx) == nil {
+		if err := a.Vision.Check(ctx); err == nil {
 			return nil
+		} else {
+			lastErr = err
 		}
 		time.Sleep(300 * time.Millisecond)
 	}
+	if lastErr != nil {
+		return fmt.Errorf("python vision service did not become healthy: %w", lastErr)
+	}
 	return errors.New("python vision service did not become healthy")
+}
+
+func visionStartTimeout() time.Duration {
+	raw := env("VISION_START_TIMEOUT", "")
+	if raw == "" {
+		return 90 * time.Second
+	}
+	if seconds, err := strconv.Atoi(raw); err == nil {
+		return time.Duration(seconds) * time.Second
+	}
+	if duration, err := time.ParseDuration(raw); err == nil {
+		return duration
+	}
+	return 90 * time.Second
 }
 
 func (v *VisionClient) Check(ctx context.Context) error {
