@@ -1,22 +1,15 @@
 # find_fontman
 
-图片字体识别工具 MVP。用户上传一张包含文字的图片，手动框选目标文字区域，系统用本地 OCR 辅助识别文本，再遍历本地字体库渲染同样文本并评分，返回最相似的 Top10 字体。
+Image font recognition MVP. Go provides the debug web/API shell; Python is the main vision and font recognition SDK.
 
-## 当前能力
+## Current Architecture
 
-- Go Web 服务：上传图片、框选区域、调用视觉服务、展示 Top10。
-- Python 视觉服务：字体索引、裁剪区域、PaddleOCR 接入、Pillow/NumPy 渲染评分。
-- 字体匹配任务：后台并发评分，前端通过 SSE 实时显示粗排/精排进度。
-- Top10 结果由 Python 直接返回字体预览图 `preview_base64`，Go 只做调试代理和透传。
-- 字体匹配引擎：OpenCV 前景提取、Chamfer/IoU/Edge/SSIM/密度评分、字号/偏移/缩放对齐搜索。
-- 本地字体库：默认读取 `fonts/1中文简体`、`fonts/2中文繁体`、`fonts/4英文`。
-- 评分拆解：`ssim`、`iou`、`edge`、`shape` 和总分。
+- Go web service: upload image, select text region, proxy OCR/match calls, stream progress with SSE.
+- Python vision service: OCR crop handling, renderer matcher fallback, font AI training/inference.
+- Font AI path: synthetic font dataset -> ArcFace embedding model -> NumPy cosine index -> online TopK retrieval.
+- Runtime data stays under `data/`; local fonts stay under `fonts/`; neither is committed.
 
-> 当前仓库保留了 `proto/font_match.proto` 作为 gRPC 契约；由于本机未安装 `protoc`，MVP 运行路径先使用 Go 到 Python 的本地 HTTP JSON 接口。安装代码生成工具后可以按该 proto 替换传输层。
-
-## 环境
-
-建议使用 Python 3.11。Python 3.13 对 PaddleOCR/PaddlePaddle 的兼容风险较高。
+## Setup
 
 ```powershell
 winget install -e --id Python.Python.3.11 --accept-package-agreements --accept-source-agreements
@@ -25,70 +18,58 @@ py -3.11 -m venv .venv
 .\.venv\Scripts\python -m pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r python_service\requirements.txt
 ```
 
-如果暂时没有安装 PaddleOCR，也可以启动应用并手动输入文本；匹配字体需要至少安装 `pillow` 和 `numpy`。
+Font AI requires PyTorch. Install a CPU or CUDA build separately for your machine:
 
-## 启动
+```powershell
+.\.venv\Scripts\python -m pip install torch torchvision
+```
+
+## Run
 
 ```powershell
 go run .\cmd\findfontman
 ```
 
-打开：
+Open:
 
 ```text
 http://localhost:8080
 ```
 
-Go 服务会尝试拉起：
+## Environment Variables
 
-```text
-python_service/service.py --addr 127.0.0.1:9091
+- `ADDR`: Go web address, default `:8080`
+- `VISION_ADDR`: Python service address, default `127.0.0.1:9091`
+- `PYTHON`: Python interpreter path
+- `SKIP_PYTHON_SERVICE=1`: do not auto-start Python service
+- `FONTMAN_MAX_CANDIDATES`: renderer fallback coarse candidate limit, `0` means all
+- `FONTMAN_FINE_CANDIDATES`: renderer fallback fine candidate limit, `0` means all
+- `FONTMAN_MATCH_WORKERS`: renderer fallback worker threads
+
+## Font AI Workflow
+
+Smoke train a small ArcFace model and build an index:
+
+```powershell
+.\scripts\train_ai_smoke.ps1 -LimitFonts 100 -SamplesPerFont 10 -Epochs 1
 ```
 
-可用环境变量：
+Full Chinese simplified training:
 
-- `ADDR`：Go Web 地址，默认 `:8080`
-- `VISION_ADDR`：Python 服务地址，默认 `127.0.0.1:9091`
-- `PYTHON`：指定 Python 解释器
-- `SKIP_PYTHON_SERVICE=1`：不自动拉起 Python 服务
-- `FONTMAN_MAX_CANDIDATES`：单次匹配最多粗排候选数，默认 `0` 表示全量
-- `FONTMAN_MATCH_WORKERS`：Python 字体评分线程数，默认 `min(8, CPU 核心数)`
-- `FONTMAN_FINE_CANDIDATES`：进入精排对齐搜索的候选数，默认 `0` 表示粗排结果全量精排
-
-## 使用流程
-
-1. 点击上传图片。
-2. 在图片上拖拽框选一段文字。
-3. 点击 `OCR 识别`，或直接在文本框手动输入/修正文字。
-4. 点击 `匹配字体`。
-5. 查看 Top10 字体、预览图和评分拆解。
-
-## 数据目录
-
-运行时生成文件位于 `data/`：
-
-- `data/uploads/`：上传图片
-- `data/previews/`：字体渲染预览图
-- `data/crops/`：OCR 裁剪图
-- `data/font_index.sqlite`：字体索引缓存
-
-`fonts/` 和 `data/` 默认不纳入 Git。
-
-## 基准测试
-
-自定义中文测试文本：
-
-```text
-data/benchmark_texts.txt
+```powershell
+.\.venv\Scripts\python -m python_service.font_ai.train --fonts "fonts\1中文简体" --samples-per-font 100 --epochs 8 --batch-size 16 --grad-accum 2
+.\.venv\Scripts\python -m python_service.font_ai.build_index --fonts "fonts\1中文简体" --samples-per-font 8
 ```
 
-运行合成基准：
+When `data/font_ai/font_embedding.pt` and `data/font_ai/font_index.npz` exist, `/match` uses embedding retrieval. Otherwise it falls back to the renderer matcher.
+
+## Benchmark
 
 ```powershell
 .\scripts\benchmark.ps1 -SampleSize 20
 ```
 
-报告输出：
+Reports:
 
 - `data/benchmark/report.json`
 - `data/benchmark/report.html`

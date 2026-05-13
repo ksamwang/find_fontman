@@ -94,6 +94,7 @@ matchBtn.addEventListener("click", async () => {
     box: selection,
     text: textInput.value.trim(),
     top_k: Number(topKInput.value || 10),
+    rerank: false,
   });
   if (!res.ok) {
     matchBtn.disabled = false;
@@ -211,7 +212,7 @@ function renderResults(payload) {
   resultList.innerHTML = payload.results.map((item, idx) => `
     <article class="result-card">
       <strong>${idx + 1}. ${escapeHTML(item.font_name)}</strong>
-      <div class="score">Score ${formatScore(item.score_total)}</div>
+      <div class="score">Score ${formatScore(item.score_total)} ${item.match_mode ? `(${escapeHTML(item.match_mode)})` : ""}</div>
       ${previewImage(item)}
       <div class="metric-grid">
         <span>Chamfer ${formatScore(item.score_chamfer)}</span>
@@ -220,6 +221,7 @@ function renderResults(payload) {
         <span>Edge ${formatScore(item.score_edge)}</span>
         <span>Shape ${formatScore(item.score_shape)}</span>
         <span>Density ${formatScore(item.score_density)}</span>
+        <span>Embed ${formatScore(item.embedding_score)}</span>
       </div>
     </article>
   `).join("");

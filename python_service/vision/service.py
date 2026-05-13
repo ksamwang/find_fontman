@@ -7,8 +7,10 @@ from typing import Any
 from .config import Settings
 from .deps import Image, PaddleOCR, require_pillow
 from .font_index import FontIndex
+from .font_index import FontRecord
 from .matcher import FontMatcher
 from .ocr import OCR
+from python_service.font_ai.infer import FontEmbeddingMatcher
 
 
 class VisionService:
@@ -21,6 +23,7 @@ class VisionService:
         self.index.ensure()
         self.ocr = OCR()
         self.matcher = FontMatcher(self.index, settings.previews)
+        self.ai_matcher = FontEmbeddingMatcher(settings.root, settings.fonts, settings.data)
 
     def health(self) -> dict[str, Any]:
         return {
@@ -29,9 +32,11 @@ class VisionService:
             "numpy": self._numpy_available(),
             "paddleocr": PaddleOCR is not None,
             "font_count": self.index.count(),
+            "match_mode": "embedding" if self.ai_matcher.available else "renderer",
             "capabilities": {
                 "match_tasks": True,
                 "preview_base64": True,
+                "embedding_match": self.ai_matcher.available,
             },
         }
 
@@ -56,6 +61,29 @@ class VisionService:
         text = str(payload.get("text", "")).strip()
         top_k = int(payload.get("top_k") or 10)
         crop = self.crop(Path(payload["image_path"]), payload["box"])
+        rerank = bool(payload.get("rerank")) or str(payload.get("rerank", "")).lower() == "true"
+        if self.ai_matcher.available and not rerank:
+            started = time.time()
+            result = self.ai_matcher.match(crop, text=text, top_k=top_k)
+            result["elapsed_ms"] = int((time.time() - started) * 1000)
+            return result
+        if self.ai_matcher.available and rerank:
+            started = time.time()
+            ai_result = self.ai_matcher.match(crop, text=text, top_k=top_k, top_n=100)
+            records = [
+                FontRecord(
+                    path=self.ai_matcher.records[idx]["path"],
+                    name=self.ai_matcher.records[idx]["name"],
+                    category=self.ai_matcher.records[idx].get("category", ""),
+                    mtime=0,
+                    size=0,
+                )
+                for idx in ai_result.get("top_indices", [])
+            ]
+            result = self.matcher.match(crop, text, top_k, progress=progress, records_override=records)
+            result["match_mode"] = "embedding_rerank"
+            result["elapsed_ms"] = int((time.time() - started) * 1000)
+            return result
         return self.matcher.match(crop, text, top_k, progress=progress)
 
     def crop(self, image_path: Path, raw_box: dict[str, Any]) -> Any:

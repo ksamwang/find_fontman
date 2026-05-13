@@ -29,6 +29,7 @@ type matchRequest struct {
 	Box     box    `json:"box"`
 	Text    string `json:"text"`
 	TopK    int    `json:"top_k"`
+	Rerank  bool   `json:"rerank"`
 }
 
 type scoreBreakdown struct {
@@ -41,21 +42,23 @@ type scoreBreakdown struct {
 }
 
 type fontResult struct {
-	FontName      string         `json:"font_name"`
-	FontPath      string         `json:"font_path"`
-	ScoreTotal    float64        `json:"score_total"`
-	ScoreSSIM     float64        `json:"score_ssim"`
-	ScoreIOU      float64        `json:"score_iou"`
-	ScoreEdge     float64        `json:"score_edge"`
-	ScoreShape    float64        `json:"score_shape"`
-	ScoreChamfer  float64        `json:"score_chamfer"`
-	ScoreDensity  float64        `json:"score_density"`
-	Align         map[string]any `json:"align"`
-	PreviewPath   string         `json:"preview_path"`
-	PreviewBase64 string         `json:"preview_base64"`
-	PreviewMIME   string         `json:"preview_mime"`
-	PreviewURL    string         `json:"preview_url"`
-	ScoreDetails  scoreBreakdown `json:"score_details"`
+	FontName       string         `json:"font_name"`
+	FontPath       string         `json:"font_path"`
+	ScoreTotal     float64        `json:"score_total"`
+	ScoreSSIM      float64        `json:"score_ssim"`
+	ScoreIOU       float64        `json:"score_iou"`
+	ScoreEdge      float64        `json:"score_edge"`
+	ScoreShape     float64        `json:"score_shape"`
+	ScoreChamfer   float64        `json:"score_chamfer"`
+	ScoreDensity   float64        `json:"score_density"`
+	EmbeddingScore float64        `json:"embedding_score"`
+	MatchMode      string         `json:"match_mode"`
+	Align          map[string]any `json:"align"`
+	PreviewPath    string         `json:"preview_path"`
+	PreviewBase64  string         `json:"preview_base64"`
+	PreviewMIME    string         `json:"preview_mime"`
+	PreviewURL     string         `json:"preview_url"`
+	ScoreDetails   scoreBreakdown `json:"score_details"`
 }
 
 type matchResponse struct {
@@ -63,6 +66,7 @@ type matchResponse struct {
 	CandidateSize int          `json:"candidate_size"`
 	ElapsedMS     int64        `json:"elapsed_ms"`
 	Warning       string       `json:"warning,omitempty"`
+	MatchMode     string       `json:"match_mode,omitempty"`
 }
 
 type matchStartResponse struct {

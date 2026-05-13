@@ -105,6 +105,9 @@ func (a *App) handleMatch(w http.ResponseWriter, r *http.Request) {
 			Chamfer: out.Results[i].ScoreChamfer,
 			Density: out.Results[i].ScoreDensity,
 		}
+		if out.Results[i].MatchMode == "" && out.MatchMode != "" {
+			out.Results[i].MatchMode = out.MatchMode
+		}
 	}
 	writeJSON(w, out)
 }
@@ -183,7 +186,7 @@ func (a *App) matchPayload(w http.ResponseWriter, r *http.Request) (map[string]a
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return nil, false
 	}
-	return map[string]any{"image_path": imagePath, "box": req.Box, "text": req.Text, "top_k": req.TopK}, true
+	return map[string]any{"image_path": imagePath, "box": req.Box, "text": req.Text, "top_k": req.TopK, "rerank": req.Rerank}, true
 }
 
 func (a *App) imagePath(id string) (string, error) {

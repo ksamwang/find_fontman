@@ -29,13 +29,14 @@ class FontMatcher:
         text: str,
         top_k: int,
         progress: Callable[[dict[str, Any]], None] | None = None,
+        records_override: list[FontRecord] | None = None,
     ) -> dict[str, Any]:
         require_pillow()
         require_numpy()
         require_cv2()
         started = time.time()
         target = self.engine.prepare_target(crop)
-        candidates = self.filter_candidates(text, progress=progress)
+        candidates = records_override if records_override is not None else self.filter_candidates(text, progress=progress)
         self.emit(progress, "candidates", 0, len(candidates), f"{len(candidates)} candidates selected")
 
         coarse = self.engine.coarse_rank(candidates, target, text, progress=progress)
@@ -48,6 +49,7 @@ class FontMatcher:
             "candidate_size": len(candidates),
             "elapsed_ms": int((time.time() - started) * 1000),
             "warning": "" if fine else "No scoreable fonts found. Check text, fonts, and image dependencies.",
+            "match_mode": "renderer",
         }
 
     def filter_candidates(
@@ -114,6 +116,8 @@ class FontMatcher:
             "score_shape": round(score.score_shape, 6),
             "score_chamfer": round(score.score_chamfer, 6),
             "score_density": round(score.score_density, 6),
+            "embedding_score": 0.0,
+            "match_mode": "renderer",
             "align": align_to_dict(score.align),
             "preview_path": str(preview_path),
             "preview_base64": self.preview_base64(preview_path),
