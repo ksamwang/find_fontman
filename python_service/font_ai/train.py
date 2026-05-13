@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from .config import AIPaths
+from .config import AIPaths, resolve_fonts_dir
 from .dataset import FontRenderDataset, read_texts, scan_font_records, write_metadata
 from .deps import DataLoader, F, torch, require_torch
 
@@ -14,10 +14,11 @@ def train(args: argparse.Namespace) -> None:
     from .model import create_model
 
     root = Path(args.root).resolve()
-    paths = AIPaths(root=root, fonts=Path(args.fonts).resolve(), data=Path(args.data).resolve())
+    fonts_dir = resolve_fonts_dir(root, args.fonts)
+    paths = AIPaths(root=root, fonts=fonts_dir, data=Path(args.data).resolve())
     paths.ai_dir.mkdir(parents=True, exist_ok=True)
     texts = read_texts(Path(args.texts) if args.texts else None)
-    records = scan_font_records(Path(args.fonts).resolve(), limit=args.limit_fonts, texts=texts)
+    records = scan_font_records(fonts_dir, limit=args.limit_fonts, texts=texts)
     if not records:
         raise RuntimeError("no trainable fonts found")
     write_metadata(paths.metadata, records, texts)
@@ -74,7 +75,7 @@ def save_checkpoint(path: Path, model, optimizer, epoch: int, records: list[dict
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default=".")
-    parser.add_argument("--fonts", default="fonts/1中文简体")
+    parser.add_argument("--fonts", default="")
     parser.add_argument("--data", default="data")
     parser.add_argument("--texts", default="data/benchmark_texts.txt")
     parser.add_argument("--samples-per-font", type=int, default=100)

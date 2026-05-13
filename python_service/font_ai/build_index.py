@@ -5,7 +5,7 @@ import json
 import random
 from pathlib import Path
 
-from .config import AIPaths
+from .config import AIPaths, resolve_fonts_dir
 from .dataset import read_metadata
 from .deps import torch, require_torch
 from .synth import render_training_image
@@ -18,7 +18,8 @@ def build_index(args: argparse.Namespace) -> None:
     from .model import create_model
 
     root = Path(args.root).resolve()
-    paths = AIPaths(root=root, fonts=Path(args.fonts).resolve(), data=Path(args.data).resolve())
+    fonts_dir = resolve_fonts_dir(root, args.fonts)
+    paths = AIPaths(root=root, fonts=fonts_dir, data=Path(args.data).resolve())
     metadata = read_metadata(paths.metadata)
     records = metadata["fonts"]
     texts = metadata["texts"]
@@ -54,7 +55,7 @@ def build_index(args: argparse.Namespace) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default=".")
-    parser.add_argument("--fonts", default="fonts/1中文简体")
+    parser.add_argument("--fonts", default="")
     parser.add_argument("--data", default="data")
     parser.add_argument("--samples-per-font", type=int, default=8)
     parser.add_argument("--seed", type=int, default=13)
