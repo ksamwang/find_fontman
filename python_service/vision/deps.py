@@ -11,6 +11,11 @@ except Exception:  # pragma: no cover
     np = None
 
 try:
+    import cv2
+except Exception:  # pragma: no cover
+    cv2 = None
+
+try:
     from paddleocr import PaddleOCR
 except Exception:  # pragma: no cover
     PaddleOCR = None
@@ -24,3 +29,8 @@ def require_pillow() -> None:
 def require_numpy() -> None:
     if np is None:
         raise RuntimeError("NumPy is not installed. Install python_service/requirements.txt.")
+
+
+def require_cv2() -> None:
+    if cv2 is None:
+        raise RuntimeError("OpenCV is not installed. Install python_service/requirements.txt.")

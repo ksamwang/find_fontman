@@ -98,10 +98,12 @@ func (a *App) handleMatch(w http.ResponseWriter, r *http.Request) {
 			out.Results[i].PreviewURL = "/previews/" + filepath.Base(out.Results[i].PreviewPath)
 		}
 		out.Results[i].ScoreDetails = scoreBreakdown{
-			SSIM:  out.Results[i].ScoreSSIM,
-			IOU:   out.Results[i].ScoreIOU,
-			Edge:  out.Results[i].ScoreEdge,
-			Shape: out.Results[i].ScoreShape,
+			SSIM:    out.Results[i].ScoreSSIM,
+			IOU:     out.Results[i].ScoreIOU,
+			Edge:    out.Results[i].ScoreEdge,
+			Shape:   out.Results[i].ScoreShape,
+			Chamfer: out.Results[i].ScoreChamfer,
+			Density: out.Results[i].ScoreDensity,
 		}
 	}
 	writeJSON(w, out)

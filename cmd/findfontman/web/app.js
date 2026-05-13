@@ -202,10 +202,12 @@ function renderResults(payload) {
       <div class="score">Score ${formatScore(item.score_total)}</div>
       ${previewImage(item)}
       <div class="metric-grid">
+        <span>Chamfer ${formatScore(item.score_chamfer)}</span>
         <span>SSIM ${formatScore(item.score_ssim)}</span>
         <span>IoU ${formatScore(item.score_iou)}</span>
         <span>Edge ${formatScore(item.score_edge)}</span>
         <span>Shape ${formatScore(item.score_shape)}</span>
+        <span>Density ${formatScore(item.score_density)}</span>
       </div>
     </article>
   `).join("");

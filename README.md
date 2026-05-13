@@ -8,6 +8,7 @@
 - Python 视觉服务：字体索引、裁剪区域、PaddleOCR 接入、Pillow/NumPy 渲染评分。
 - 字体匹配任务：后台并发评分，前端通过 SSE 实时显示粗排/精排进度。
 - Top10 结果由 Python 直接返回字体预览图 `preview_base64`，Go 只做调试代理和透传。
+- 字体匹配引擎：OpenCV 前景提取、Chamfer/IoU/Edge/SSIM/密度评分、字号/偏移/缩放对齐搜索。
 - 本地字体库：默认读取 `fonts/1中文简体`、`fonts/2中文繁体`、`fonts/4英文`。
 - 评分拆解：`ssim`、`iou`、`edge`、`shape` 和总分。
 
@@ -50,8 +51,9 @@ python_service/service.py --addr 127.0.0.1:9091
 - `VISION_ADDR`：Python 服务地址，默认 `127.0.0.1:9091`
 - `PYTHON`：指定 Python 解释器
 - `SKIP_PYTHON_SERVICE=1`：不自动拉起 Python 服务
-- `FONTMAN_MAX_CANDIDATES`：单次匹配最多粗排候选数，默认 `200`
+- `FONTMAN_MAX_CANDIDATES`：单次匹配最多粗排候选数，默认 `80`
 - `FONTMAN_MATCH_WORKERS`：Python 字体评分线程数，默认 `min(8, CPU 核心数)`
+- `FONTMAN_FINE_CANDIDATES`：进入精排对齐搜索的候选数，默认 `10`
 
 ## 使用流程
 
@@ -71,3 +73,22 @@ python_service/service.py --addr 127.0.0.1:9091
 - `data/font_index.sqlite`：字体索引缓存
 
 `fonts/` 和 `data/` 默认不纳入 Git。
+
+## 基准测试
+
+自定义中文测试文本：
+
+```text
+data/benchmark_texts.txt
+```
+
+运行合成基准：
+
+```powershell
+.\scripts\benchmark.ps1 -SampleSize 20
+```
+
+报告输出：
+
+- `data/benchmark/report.json`
+- `data/benchmark/report.html`

@@ -46,6 +46,8 @@ message FontMatchResult {
   string preview_path = 8;
   string preview_base64 = 9;
   string preview_mime = 10;
+  double score_chamfer = 11;
+  double score_density = 12;
 }
 
 message MatchFontsResponse {

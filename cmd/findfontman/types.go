@@ -32,10 +32,12 @@ type matchRequest struct {
 }
 
 type scoreBreakdown struct {
-	SSIM  float64 `json:"ssim"`
-	IOU   float64 `json:"iou"`
-	Edge  float64 `json:"edge"`
-	Shape float64 `json:"shape"`
+	SSIM    float64 `json:"ssim"`
+	IOU     float64 `json:"iou"`
+	Edge    float64 `json:"edge"`
+	Shape   float64 `json:"shape"`
+	Chamfer float64 `json:"chamfer"`
+	Density float64 `json:"density"`
 }
 
 type fontResult struct {
@@ -46,6 +48,9 @@ type fontResult struct {
 	ScoreIOU      float64        `json:"score_iou"`
 	ScoreEdge     float64        `json:"score_edge"`
 	ScoreShape    float64        `json:"score_shape"`
+	ScoreChamfer  float64        `json:"score_chamfer"`
+	ScoreDensity  float64        `json:"score_density"`
+	Align         map[string]any `json:"align"`
 	PreviewPath   string         `json:"preview_path"`
 	PreviewBase64 string         `json:"preview_base64"`
 	PreviewMIME   string         `json:"preview_mime"`
