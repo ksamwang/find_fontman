@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package fontman.v1;
+
+option go_package = "find_fontman/proto/fontmanv1";
+
+service FontMatchService {
+  rpc AnalyzeCrop(AnalyzeCropRequest) returns (AnalyzeCropResponse);
+  rpc MatchFonts(MatchFontsRequest) returns (MatchFontsResponse);
+}
+
+message Box {
+  int32 x = 1;
+  int32 y = 2;
+  int32 w = 3;
+  int32 h = 4;
+}
+
+message AnalyzeCropRequest {
+  string image_path = 1;
+  Box box = 2;
+}
+
+message AnalyzeCropResponse {
+  string text = 1;
+  double confidence = 2;
+  string crop_path = 3;
+  string warning = 4;
+}
+
+message MatchFontsRequest {
+  string image_path = 1;
+  Box box = 2;
+  string text = 3;
+  int32 top_k = 4;
+}
+
+message FontMatchResult {
+  string font_name = 1;
+  string font_path = 2;
+  double score_total = 3;
+  double score_ssim = 4;
+  double score_iou = 5;
+  double score_edge = 6;
+  double score_shape = 7;
+  string preview_path = 8;
+}
+
+message MatchFontsResponse {
+  repeated FontMatchResult results = 1;
+  int32 candidate_size = 2;
+  int64 elapsed_ms = 3;
+  string warning = 4;
+}

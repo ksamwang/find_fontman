@@ -20,6 +20,10 @@ profile.cov
 # Dependency directories (remove the comment below to include it)
 # vendor/
 fonts/
+data/
+.venv/
+__pycache__/
+*.pyc
 
 # Go workspace file
 go.work

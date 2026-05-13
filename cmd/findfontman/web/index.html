@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Find Fontman</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="workspace">
+      <header class="topbar">
+        <div>
+          <h1>Find Fontman</h1>
+          <p>上传图片，框选文字，匹配本地字体库。</p>
+        </div>
+        <label class="upload-button">
+          <input id="fileInput" type="file" accept="image/*">
+          上传图片
+        </label>
+      </header>
+
+      <div class="stage" id="stage">
+        <img id="sourceImage" alt="">
+        <canvas id="selectionCanvas"></canvas>
+        <div id="emptyState">选择一张包含文字的图片开始</div>
+      </div>
+
+      <div class="controls">
+        <button id="analyzeBtn" disabled>OCR 识别</button>
+        <button id="matchBtn" disabled>匹配字体</button>
+        <label>
+          TopK
+          <input id="topK" type="number" min="1" max="50" value="10">
+        </label>
+        <span id="status"></span>
+      </div>
+
+      <label class="text-label">
+        识别/修正文本
+        <textarea id="textInput" rows="2" placeholder="框选后 OCR 自动填入，也可以手动修改"></textarea>
+      </label>
+    </section>
+
+    <aside class="results">
+      <div class="result-head">
+        <h2>Top10</h2>
+        <span id="candidateInfo"></span>
+      </div>
+      <div id="resultList" class="result-list"></div>
+    </aside>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>
