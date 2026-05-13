@@ -17,13 +17,31 @@ class OCR:
         if PaddleOCR is None:
             return "", 0.0
         if self._engine is None:
-            self._engine = PaddleOCR(lang="ch", use_textline_orientation=True)
+            self._engine = PaddleOCR(
+                lang="ch",
+                use_doc_orientation_classify=False,
+                use_doc_unwarping=False,
+                use_textline_orientation=True,
+            )
 
-        result = self._engine.ocr(str(image_path), cls=True)
+        result = self._engine.predict(str(image_path))
+        return best_ocr_text(result)
+
+
+def best_ocr_text(result: Any) -> tuple[str, float]:
         best_text = ""
         best_conf = 0.0
         for page in result or []:
-            for line in page or []:
+            page_data = dict(page) if not isinstance(page, dict) else page
+
+            texts = page_data.get("rec_texts") or []
+            scores = page_data.get("rec_scores") or []
+            for text, conf in zip(texts, scores):
+                if float(conf) > best_conf:
+                    best_text, best_conf = str(text), float(conf)
+
+            # Compatibility with PaddleOCR 2.x style nested output.
+            for line in page if isinstance(page, list) else []:
                 if len(line) >= 2 and line[1]:
                     text, conf = line[1][0], float(line[1][1])
                     if conf > best_conf:
