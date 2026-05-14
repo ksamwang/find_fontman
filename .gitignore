@@ -22,6 +22,8 @@ profile.cov
 fonts/
 data/
 .venv/
+training/.venv/
+training/output/
 __pycache__/
 *.pyc
 
