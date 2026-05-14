@@ -46,3 +46,10 @@ The main service reads:
 
 The script can install Python 3.11 with `winget` when Python 3.11/3.12 is missing.
 It does not install or upgrade NVIDIA drivers. If CUDA is unavailable, rerun with `-Device cpu`.
+
+The script keeps the bundled pip by default because some mirrors may reject the latest pip wheel.
+Use `-UpgradePip` only when you need it. If PyPI is slow from your network, switch mirrors:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\training\scripts\train_full_windows_gpu.ps1 -PipIndexUrl https://mirrors.aliyun.com/pypi/simple
+```

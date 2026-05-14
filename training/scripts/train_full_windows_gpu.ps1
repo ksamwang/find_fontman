@@ -13,7 +13,8 @@ param(
     [string]$Fonts = "fonts",
     [string]$Output = "training\output",
     [string]$Texts = "training\texts\zh_common.txt",
-    [string]$PipIndexUrl = "https://pypi.tuna.tsinghua.edu.cn/simple",
+    [string]$PipIndexUrl = "https://pypi.org/simple",
+    [string[]]$PipFallbackIndexUrls = @("https://mirrors.aliyun.com/pypi/simple", "https://pypi.tuna.tsinghua.edu.cn/simple", "https://mirrors.cloud.tencent.com/pypi/simple"),
     [string]$TorchCudaIndexUrl = "https://download.pytorch.org/whl/cu126",
     [string]$TorchCpuIndexUrl = "https://download.pytorch.org/whl/cpu",
     [ValidateSet("cuda", "cpu")]
@@ -21,7 +22,8 @@ param(
     [switch]$Resume,
     [switch]$SkipIndex,
     [switch]$ExportToMainData,
-    [switch]$SkipInstall
+    [switch]$SkipInstall,
+    [switch]$UpgradePip
 )
 
 $ErrorActionPreference = "Stop"
@@ -36,8 +38,9 @@ function Find-Python {
             $args = $parts[1..($parts.Length - 1)]
         }
         try {
-            $version = & $exe @args -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
-            if ($LASTEXITCODE -eq 0 -and ($version -eq "3.11" -or $version -eq "3.12")) {
+            $output = & $exe @args -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
+            $exitCode = $LASTEXITCODE
+            if ($exitCode -eq 0 -and ($output -eq "3.11" -or $output -eq "3.12")) {
                 return @{ Exe = $exe; Args = $args }
             }
         } catch {
@@ -75,6 +78,26 @@ function Invoke-Checked {
     }
 }
 
+function Invoke-PipInstallWithFallback {
+    param(
+        [string[]]$PipArguments,
+        [string]$Label
+    )
+    $indexes = @($PipIndexUrl) + $PipFallbackIndexUrls
+    $lastExit = 0
+    foreach ($index in $indexes) {
+        Write-Host "$Label using $index"
+        $arguments = @("-m", "pip", "install", "--index-url", $index, "--prefer-binary") + $PipArguments
+        & $python @arguments
+        $lastExit = $LASTEXITCODE
+        if ($lastExit -eq 0) {
+            return
+        }
+        Write-Warning "$Label failed with $index, trying next mirror..."
+    }
+    throw "$Label failed with exit code $lastExit"
+}
+
 $root = (Resolve-Path ".").Path
 $trainingRoot = Join-Path $root "training"
 $venv = Join-Path $trainingRoot ".venv"
@@ -83,16 +106,16 @@ $fontPath = (Resolve-Path $Fonts).Path
 $outputPath = if ([IO.Path]::IsPathRooted($Output)) { $Output } else { Join-Path $root $Output }
 $requirements = Join-Path $trainingRoot "requirements.txt"
 
-$pythonCommand = Find-Python
-if ($null -eq $pythonCommand) {
-    Install-Python
-    $pythonCommand = Find-Python
-}
-if ($null -eq $pythonCommand) {
-    throw "Python 3.11/3.12 is still not available after installation attempt."
-}
-
 if (-not (Test-Path $venvPython)) {
+    $pythonCommand = Find-Python
+    if ($null -eq $pythonCommand) {
+        Install-Python
+        $pythonCommand = Find-Python
+    }
+    if ($null -eq $pythonCommand) {
+        throw "Python 3.11/3.12 is still not available after installation attempt."
+    }
+
     Write-Host "Creating venv at $venv"
     Invoke-Python -PythonCommand $pythonCommand -Arguments @("-m", "venv", $venv)
 }
@@ -105,11 +128,15 @@ if ($TorchThreads -gt 0) {
 }
 
 if (-not $SkipInstall) {
-    Write-Host "Upgrading pip tooling..."
-    Invoke-Checked -FilePath $python -Arguments @("-m", "pip", "install", "--index-url", $PipIndexUrl, "--upgrade", "pip", "wheel", "setuptools") -Label "pip tooling install"
+    if ($UpgradePip) {
+        Write-Host "Upgrading pip tooling..."
+        Invoke-PipInstallWithFallback -PipArguments @("--upgrade", "pip", "wheel", "setuptools") -Label "pip tooling install"
+    } else {
+        Write-Host "Keeping existing pip. Use -UpgradePip if you want to upgrade pip/wheel/setuptools."
+    }
 
     Write-Host "Installing standalone training requirements..."
-    Invoke-Checked -FilePath $python -Arguments @("-m", "pip", "install", "--index-url", $PipIndexUrl, "-r", $requirements) -Label "training requirements install"
+    Invoke-PipInstallWithFallback -PipArguments @("-r", $requirements) -Label "training requirements install"
 
     if ($Device -eq "cuda") {
         $nvidiaSmi = Get-Command nvidia-smi -ErrorAction SilentlyContinue
