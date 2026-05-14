@@ -5,9 +5,9 @@ import random
 from pathlib import Path
 from typing import Callable
 
-from .config import DEFAULT_TEXTS
 from .deps import Dataset, require_torch
 from .synth import can_render, render_training_image
+from .texts import TextSampler, read_fixed_texts
 from .transforms import image_to_tensor
 
 
@@ -15,10 +15,10 @@ BaseDataset = Dataset if Dataset is not None else object
 
 
 class FontRenderDataset(BaseDataset):
-    def __init__(self, font_records: list[dict], texts: list[str], samples_per_font: int, seed: int = 7) -> None:
+    def __init__(self, font_records: list[dict], text_sampler: TextSampler, samples_per_font: int, seed: int = 7) -> None:
         require_torch()
         self.font_records = font_records
-        self.texts = texts or DEFAULT_TEXTS
+        self.text_sampler = text_sampler
         self.samples_per_font = samples_per_font
         self.seed = seed
 
@@ -30,7 +30,7 @@ class FontRenderDataset(BaseDataset):
         sample_idx = idx % self.samples_per_font
         record = self.font_records[font_idx]
         rng = random.Random(self.seed + idx * 9973)
-        text = self.texts[(sample_idx + rng.randint(0, len(self.texts) - 1)) % len(self.texts)]
+        text = self.text_sampler.sample(rng).text
         image = render_training_image(record["path"], text, rng)
         return image_to_tensor(image), font_idx
 
@@ -42,7 +42,7 @@ def scan_font_records(
     progress: Callable[[dict], None] | None = None,
     log_every: int = 100,
 ) -> list[dict]:
-    texts = texts or DEFAULT_TEXTS
+    texts = texts or TextSampler().probe_texts()
     records = []
     scanned = 0
     skipped = 0
@@ -66,10 +66,7 @@ def scan_font_records(
 
 
 def read_texts(path: Path | None) -> list[str]:
-    if path is None or not path.exists():
-        return DEFAULT_TEXTS
-    texts = [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    return texts or DEFAULT_TEXTS
+    return read_fixed_texts(path, defaults=True)
 
 
 def write_metadata(path: Path, records: list[dict], texts: list[str]) -> None:

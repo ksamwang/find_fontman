@@ -9,6 +9,7 @@ from .config import AIPaths, resolve_path
 from .dataset import FontRenderDataset, read_texts, scan_font_records, write_metadata
 from .deps import DataLoader, F, torch, require_torch
 from .logging import JsonlLogger
+from .texts import TextSampler
 
 
 def train(args: argparse.Namespace) -> None:
@@ -27,23 +28,33 @@ def train(args: argparse.Namespace) -> None:
     paths.ai_dir.mkdir(parents=True, exist_ok=True)
     logger = JsonlLogger(paths.train_log)
 
-    texts = read_texts(resolve_path(root, args.texts) if args.texts else None)
+    fixed_texts = read_texts(resolve_path(root, args.texts) if args.texts else None)
+    text_sampler = TextSampler(fixed_texts)
     config = vars(args).copy()
-    config.update({"root": str(root), "fonts": str(fonts_dir), "output": str(output_dir), "texts": texts})
+    config.update(
+        {
+            "root": str(root),
+            "fonts": str(fonts_dir),
+            "output": str(output_dir),
+            "fixed_text_count": len(fixed_texts),
+            "text_sampler_preview": text_sampler.preview(),
+            "scan_probe_texts": text_sampler.probe_texts(),
+        }
+    )
     paths.train_config.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
 
     logger.emit({"event": "font_scan_start", "fonts_dir": str(fonts_dir), "limit_fonts": args.limit_fonts})
     records = scan_font_records(
         fonts_dir,
         limit=args.limit_fonts,
-        texts=texts,
+        texts=text_sampler.probe_texts(),
         progress=logger.emit,
         log_every=args.scan_log_every,
     )
     if not records:
         raise RuntimeError("no trainable fonts found")
 
-    dataset = FontRenderDataset(records, texts, samples_per_font=args.samples_per_font, seed=args.seed)
+    dataset = FontRenderDataset(records, text_sampler, samples_per_font=args.samples_per_font, seed=args.seed)
     loader = DataLoader(
         dataset,
         batch_size=args.batch_size,
@@ -84,6 +95,8 @@ def train(args: argparse.Namespace) -> None:
             "epochs": args.epochs,
             "batches_per_epoch": total_batches,
             "train_batches_remaining": total_train_batches,
+            "fixed_text_count": len(fixed_texts),
+            "text_sampler_preview": text_sampler.preview(12),
         }
     )
 
@@ -128,8 +141,8 @@ def train(args: argparse.Namespace) -> None:
                         "cuda": cuda_status(),
                     }
                 )
-        save_checkpoint(paths.checkpoint, model, optimizer, epoch, records, texts)
-        write_metadata(paths.metadata, records, texts)
+        save_checkpoint(paths.checkpoint, model, optimizer, epoch, records, fixed_texts)
+        write_metadata(paths.metadata, records, fixed_texts)
         logger.emit({"event": "checkpoint_saved", "epoch": epoch, "checkpoint": str(paths.checkpoint), "elapsed_sec": round(time.monotonic() - train_started, 1)})
 
 
@@ -165,7 +178,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--root", default=".")
     parser.add_argument("--fonts", default="fonts")
     parser.add_argument("--output", default="training/output")
-    parser.add_argument("--texts", default="")
+    parser.add_argument("--texts", default="training/texts/zh_common.txt")
     parser.add_argument("--samples-per-font", type=int, default=1000)
     parser.add_argument("--limit-fonts", type=int, default=0)
     parser.add_argument("--epochs", type=int, default=8)

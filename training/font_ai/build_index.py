@@ -11,6 +11,7 @@ from .config import AIPaths, resolve_path
 from .dataset import read_metadata
 from .deps import torch, require_torch
 from .synth import render_training_image
+from .texts import TextSampler
 from .transforms import image_to_tensor
 
 
@@ -33,6 +34,7 @@ def build_index(args: argparse.Namespace) -> None:
     model = create_model(num_classes=int(ckpt["num_classes"])).to(device)
     model.load_state_dict(ckpt["model"])
     model.eval()
+    text_sampler = TextSampler(texts)
 
     embeddings = []
     with torch.no_grad():
@@ -40,7 +42,7 @@ def build_index(args: argparse.Namespace) -> None:
             vectors = []
             rng = random.Random(args.seed + idx * 97)
             for sample_idx in range(args.samples_per_font):
-                text = texts[(idx + sample_idx) % len(texts)]
+                text = text_sampler.sample(rng).text
                 image = render_training_image(record["path"], text, rng)
                 tensor = image_to_tensor(image).unsqueeze(0).to(device)
                 vector = model(tensor).cpu().numpy()[0]

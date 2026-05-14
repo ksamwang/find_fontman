@@ -18,6 +18,7 @@ Defaults:
 - samples per font: `1000`
 - epochs: `8`
 - device: `cuda`
+- text source: built-in common word list plus seeded templates for names, companies, industries, promos, numbers, and Chinese/English mixed text
 
 Quick smoke test:
 
