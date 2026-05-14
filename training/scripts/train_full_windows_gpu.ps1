@@ -23,7 +23,8 @@ param(
     [switch]$SkipIndex,
     [switch]$ExportToMainData,
     [switch]$SkipInstall,
-    [switch]$UpgradePip
+    [switch]$UpgradePip,
+    [switch]$SkipVCRedistInstall
 )
 
 $ErrorActionPreference = "Stop"
@@ -98,6 +99,56 @@ function Invoke-PipInstallWithFallback {
     throw "$Label failed with exit code $lastExit"
 }
 
+function Install-VCRedist {
+    if ($SkipVCRedistInstall) {
+        Write-Host "Skipping VC++ Redistributable installation because -SkipVCRedistInstall was provided."
+        return
+    }
+    $winget = Get-Command winget -ErrorAction SilentlyContinue
+    if ($null -eq $winget) {
+        Write-Warning "winget is not available; cannot auto-install Microsoft VC++ Redistributable."
+        return
+    }
+    Write-Host "Ensuring Microsoft Visual C++ Redistributable is installed..."
+    winget install --id Microsoft.VCRedist.2015+.x64 -e --silent --accept-package-agreements --accept-source-agreements
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "VC++ Redistributable install/repair returned exit code $LASTEXITCODE. Continuing, but PyTorch DLL loading may fail."
+    }
+}
+
+function Show-NvidiaInfo {
+    $nvidiaSmi = Get-Command nvidia-smi -ErrorAction SilentlyContinue
+    if ($null -eq $nvidiaSmi) {
+        Write-Warning "nvidia-smi was not found."
+        return
+    }
+    Write-Host "NVIDIA driver status:"
+    & nvidia-smi
+}
+
+function Verify-TorchCuda {
+    Show-NvidiaInfo
+    & $python -c "import torch; print('torch', torch.__version__); print('cuda_available', torch.cuda.is_available()); print('cuda_version', torch.version.cuda); print('device', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'none'); raise SystemExit(0 if torch.cuda.is_available() else 2)"
+    if ($LASTEXITCODE -ne 0) {
+        throw @"
+PyTorch CUDA verification failed.
+
+Common Windows causes:
+- Microsoft Visual C++ Redistributable is missing or broken.
+- NVIDIA driver is too old for the selected PyTorch CUDA wheel.
+- The current venv has a broken or mixed torch install.
+
+Suggested fixes:
+1. Reboot once if VC++ Redistributable was just installed or repaired.
+2. Update the NVIDIA driver, then rerun this script.
+3. Delete training\.venv and rerun this script to reinstall torch cleanly.
+4. For a CPU-only smoke test, rerun with -Device cpu.
+
+You can skip VC++ auto-install with -SkipVCRedistInstall if you manage it manually.
+"@
+    }
+}
+
 $root = (Resolve-Path ".").Path
 $trainingRoot = Join-Path $root "training"
 $venv = Join-Path $trainingRoot ".venv"
@@ -143,9 +194,10 @@ if (-not $SkipInstall) {
         if ($null -eq $nvidiaSmi) {
             throw "nvidia-smi was not found. Install/repair the NVIDIA driver, or rerun with -Device cpu."
         }
+        Install-VCRedist
         Write-Host "Installing PyTorch CUDA wheel..."
         Invoke-Checked -FilePath $python -Arguments @("-m", "pip", "install", "torch", "torchvision", "--index-url", $TorchCudaIndexUrl) -Label "PyTorch CUDA install"
-        Invoke-Checked -FilePath $python -Arguments @("-c", "import torch; print('torch', torch.__version__); print('cuda_available', torch.cuda.is_available()); print('device', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'none'); raise SystemExit(0 if torch.cuda.is_available() else 2)") -Label "PyTorch CUDA verification"
+        Verify-TorchCuda
     } else {
         Write-Host "Installing PyTorch CPU wheel..."
         Invoke-Checked -FilePath $python -Arguments @("-m", "pip", "install", "torch", "torchvision", "--index-url", $TorchCpuIndexUrl) -Label "PyTorch CPU install"

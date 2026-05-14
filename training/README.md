@@ -53,3 +53,7 @@ Use `-UpgradePip` only when you need it. If PyPI is slow from your network, swit
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\training\scripts\train_full_windows_gpu.ps1 -PipIndexUrl https://mirrors.aliyun.com/pypi/simple
 ```
+
+If CUDA verification fails with `c10.dll` or `WinError 1114`, it is usually a Windows runtime or driver issue.
+The script tries to install/repair Microsoft VC++ Redistributable with `winget`.
+After that, reboot once, update the NVIDIA driver if needed, delete `training\.venv`, and rerun the script.
