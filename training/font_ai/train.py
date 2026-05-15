@@ -7,7 +7,7 @@ import warnings
 from pathlib import Path
 
 from .config import AIPaths, resolve_path
-from .dataset import FontRenderDataset, read_texts, scan_font_records, write_metadata, summarize_labels
+from .dataset import FontRenderDataset, balanced_family_order, coverage_summary, read_texts, scan_font_records, write_metadata, summarize_labels
 from .deps import DataLoader, F, torch, require_torch
 from .logging import JsonlLogger
 from .texts import TextSampler
@@ -63,7 +63,7 @@ def train(args: argparse.Namespace) -> None:
     loader = DataLoader(
         dataset,
         batch_size=args.batch_size,
-        shuffle=True,
+        shuffle=False,
         num_workers=args.workers,
         drop_last=drop_last,
         pin_memory=args.device == "cuda",
@@ -109,6 +109,20 @@ def train(args: argparse.Namespace) -> None:
             "fixed_text_count": len(fixed_texts),
             "text_sampler_preview": text_sampler.preview(12),
             "label_summary": summarize_labels(records),
+            "coverage_summary": coverage_summary(records),
+            "hard_negative_ratio": args.hard_negative_ratio,
+        }
+    )
+
+    balanced_order = balanced_family_order(records, args.seed, hard_negative_ratio=args.hard_negative_ratio)
+    logger.emit(
+        {
+            "event": "sampling_ready",
+            "balanced_order_size": len(balanced_order),
+            "hard_negative_tail_size": max(0, len(balanced_order) - len(records) * 2),
+            "family_groups": len({record.get("family_name", "unknown") for record in records}),
+            "coverage_summary": coverage_summary(records),
+            "hard_negative_ratio": args.hard_negative_ratio,
         }
     )
 
@@ -156,6 +170,8 @@ def train(args: argparse.Namespace) -> None:
                         "elapsed_sec": round(elapsed, 1),
                         "eta_sec": round(eta_seconds, 1),
                         "label_summary": summarize_labels(records),
+                        "coverage_summary": coverage_summary(records),
+                        "hard_negative_ratio": args.hard_negative_ratio,
                         "cuda": cuda_status(),
                     }
                 )
@@ -249,6 +265,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--log-every", type=int, default=25)
     parser.add_argument("--scan-log-every", type=int, default=100)
     parser.add_argument("--checkpoint-every", type=int, default=500)
+    parser.add_argument("--hard-negative-ratio", type=float, default=0.25)
     return parser.parse_args()
 
 

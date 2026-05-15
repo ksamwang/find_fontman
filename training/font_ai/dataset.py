@@ -45,12 +45,13 @@ class FontRenderDataset(BaseDataset):
         self.text_sampler = text_sampler
         self.samples_per_font = samples_per_font
         self.seed = seed
+        self.order = build_balanced_order(font_records, samples_per_font, seed)
 
     def __len__(self) -> int:
-        return len(self.font_records) * self.samples_per_font
+        return len(self.order)
 
     def __getitem__(self, idx: int):
-        font_idx = idx // self.samples_per_font
+        font_idx, sample_idx = self.order[idx]
         record = self.font_records[font_idx]
         rng = random.Random(self.seed + idx * 9973)
         sample = self.text_sampler.sample(rng, record.get("script_scope", "zh_simplified"))
@@ -63,6 +64,82 @@ class FontRenderDataset(BaseDataset):
             face_index=int(record.get("face_index", 0)),
         )
         return image_to_tensor(image), font_idx
+
+
+def build_balanced_order(records: list[dict], samples_per_font: int, seed: int, hard_negative_ratio: float = 0.25) -> list[tuple[int, int]]:
+    groups: dict[str, list[int]] = {}
+    for idx, record in enumerate(records):
+        group = family_bucket(record)
+        groups.setdefault(group, []).append(idx)
+    group_names = sorted(groups)
+    rng = random.Random(seed)
+    order: list[tuple[int, int]] = []
+    for sample_idx in range(samples_per_font):
+        shuffled_groups = group_names[:]
+        rng.shuffle(shuffled_groups)
+        for group in shuffled_groups:
+            font_indices = groups[group][:]
+            rng.shuffle(font_indices)
+            for font_idx in font_indices:
+                order.append((font_idx, sample_idx))
+    return order
+
+
+def family_bucket(record: dict) -> str:
+    return "|".join(
+        [
+            str(record.get("script_scope", "unknown")),
+            str(record.get("style_group", "unknown")),
+            str(record.get("family_name", "unknown")),
+            str(record.get("weight_name", "unknown")),
+            "italic" if record.get("is_italic") else "upright",
+        ]
+    )
+
+
+def build_hard_negative_tail(records: list[dict], seed: int, hard_negative_ratio: float = 0.25) -> list[tuple[int, int]]:
+    by_family: dict[str, list[int]] = {}
+    by_style: dict[str, list[int]] = {}
+    by_weight: dict[str, list[int]] = {}
+    for idx, record in enumerate(records):
+        by_family.setdefault(str(record.get("family_name", "unknown")), []).append(idx)
+        by_style.setdefault(str(record.get("style_group", "unknown")), []).append(idx)
+        by_weight.setdefault(str(record.get("weight_name", "unknown")), []).append(idx)
+    rng = random.Random(seed + 999)
+    tail: list[tuple[int, int]] = []
+    families = [name for name, members in by_family.items() if len(members) > 1]
+    styles = [name for name, members in by_style.items() if len(members) > 1]
+    if families:
+        for family in families:
+            members = by_family[family][:]
+            rng.shuffle(members)
+            for idx in members[: max(1, int(len(members) * hard_negative_ratio))]:
+                tail.append((idx, 0))
+                if hard_negative_ratio >= 0.5:
+                    tail.append((idx, 1))
+    if styles:
+        for style in styles:
+            members = by_style[style][:]
+            rng.shuffle(members)
+            for idx in members[: max(1, int(len(members) * hard_negative_ratio))]:
+                tail.append((idx, 0))
+    if by_weight:
+        for weight, members in by_weight.items():
+            if len(members) > 1:
+                rng.shuffle(members)
+                tail.extend((idx, 0) for idx in members[: min(max(1, int(len(members) * hard_negative_ratio)), len(members))])
+    return tail
+
+
+def coverage_summary(records: list[dict]) -> dict[str, int]:
+    summary: dict[str, int] = {
+        "records": len(records),
+        "families": len({record.get("family_name", "unknown") for record in records}),
+        "styles": len({record.get("style_group", "unknown") for record in records}),
+        "weights": len({record.get("weight_name", "unknown") for record in records}),
+        "italic": sum(1 for record in records if record.get("is_italic")),
+    }
+    return summary
 
 
 def scan_font_records(
@@ -263,9 +340,11 @@ def summarize_labels(records: list[dict]) -> dict[str, int]:
         scope = record.get("script_scope", "unknown")
         style = record.get("style_group", "unknown")
         weight = record.get("weight_name", "unknown")
+        family = record.get("family_name", "unknown")
         summary[f"scope:{scope}"] = summary.get(f"scope:{scope}", 0) + 1
         summary[f"style:{style}"] = summary.get(f"style:{style}", 0) + 1
         summary[f"weight:{weight}"] = summary.get(f"weight:{weight}", 0) + 1
+        summary[f"family:{family}"] = summary.get(f"family:{family}", 0) + 1
     return summary
 
 
@@ -305,3 +384,28 @@ def sample_style(rng: random.Random, kind: str, record: dict | None = None) -> d
     if rng.random() < 0.35:
         base["align"] = rng.choice(["left", "center", "right"])
     return base
+
+
+def balanced_family_order(records: list[dict], seed: int, hard_negative_ratio: float = 0.25) -> list[int]:
+    groups: dict[str, list[int]] = {}
+    for idx, record in enumerate(records):
+        key = "|".join(
+            [
+                str(record.get("script_scope", "unknown")),
+                str(record.get("style_group", "unknown")),
+                str(record.get("family_name", "unknown")),
+            ]
+        )
+        groups.setdefault(key, []).append(idx)
+    keys = sorted(groups)
+    rng = random.Random(seed)
+    order: list[int] = []
+    for _ in range(2):
+        shuffled_keys = keys[:]
+        rng.shuffle(shuffled_keys)
+        for key in shuffled_keys:
+            members = groups[key][:]
+            rng.shuffle(members)
+            order.extend(members)
+    order.extend(build_hard_negative_tail(records, seed, hard_negative_ratio=hard_negative_ratio))
+    return order
