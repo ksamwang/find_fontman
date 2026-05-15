@@ -20,6 +20,7 @@ Defaults:
 - device: `cuda`
 - text source: built-in common word list plus seeded templates for names, companies, industries, promos, numbers, and Chinese/English mixed text
 - sampling: balanced by font family/style/weight, with hard-negative tail samples controlled by `-HardNegativeRatio` / `--hard-negative-ratio`
+- workers: recreated at each epoch boundary so synthetic augmentation changes between epochs even when `-Workers` is greater than zero
 
 Quick smoke test:
 

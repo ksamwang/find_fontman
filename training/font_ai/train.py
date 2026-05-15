@@ -74,7 +74,8 @@ def train(args: argparse.Namespace) -> None:
         num_workers=args.workers,
         drop_last=drop_last,
         pin_memory=device.type == "cuda",
-        persistent_workers=args.workers > 0,
+        # Recreate worker dataset copies each epoch so set_epoch() reaches workers.
+        persistent_workers=False,
     )
     if len(loader) == 0:
         raise RuntimeError("training loader is empty; reduce batch size or increase samples/fonts")
