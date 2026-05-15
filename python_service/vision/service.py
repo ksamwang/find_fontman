@@ -70,6 +70,8 @@ class VisionService:
         if self.ai_matcher.available and rerank:
             started = time.time()
             ai_result = self.ai_matcher.match(crop, text=text, top_k=top_k, top_n=100)
+            allowed_scopes = {"zh_simplified", "zh_traditional"} if any("\u4e00" <= ch <= "\u9fff" for ch in text) else {"english"}
+            top_indices = ai_result.get("top_indices", [])
             records = [
                 FontRecord(
                     path=self.ai_matcher.records[idx]["path"],
@@ -78,8 +80,20 @@ class VisionService:
                     mtime=0,
                     size=0,
                 )
-                for idx in ai_result.get("top_indices", [])
+                for idx in top_indices
+                if self.ai_matcher.records[idx].get("category", "unknown") in allowed_scopes
             ]
+            if not records:
+                records = [
+                    FontRecord(
+                        path=self.ai_matcher.records[idx]["path"],
+                        name=self.ai_matcher.records[idx]["name"],
+                        category=self.ai_matcher.records[idx].get("category", ""),
+                        mtime=0,
+                        size=0,
+                    )
+                    for idx in top_indices
+                ]
             result = self.matcher.match(crop, text, top_k, progress=progress, records_override=records)
             result["match_mode"] = "embedding_rerank"
             result["elapsed_ms"] = int((time.time() - started) * 1000)

@@ -13,6 +13,7 @@ INDEX_NAME = "font_index.npz"
 META_NAME = "font_index_meta.json"
 TRAIN_CONFIG_NAME = "train_config.json"
 TRAIN_LOG_NAME = "train_log.jsonl"
+TRAIN_VERSION = "2"
 
 
 @dataclass(frozen=True)

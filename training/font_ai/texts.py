@@ -103,8 +103,10 @@ class TextSampler:
     def __init__(self, fixed_texts: list[str] | None = None) -> None:
         self.fixed_texts = [text for text in fixed_texts or [] if text.strip()]
 
-    def sample(self, rng: random.Random) -> TextSample:
+    def sample(self, rng: random.Random, scope: str = "zh_simplified") -> TextSample:
         choices = ["fixed", "person", "company", "industry", "promo", "mixed", "number"]
+        if scope == "english":
+            choices = ["fixed", "mixed", "number"]
         if not self.fixed_texts:
             choices.remove("fixed")
         kind = rng.choice(choices)

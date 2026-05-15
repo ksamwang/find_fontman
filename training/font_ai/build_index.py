@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 
 from .config import AIPaths, resolve_path
-from .dataset import read_metadata
+from .dataset import read_metadata, sample_style
 from .deps import torch, require_torch
 from .synth import render_training_image
 from .texts import TextSampler
@@ -42,8 +42,14 @@ def build_index(args: argparse.Namespace) -> None:
             vectors = []
             rng = random.Random(args.seed + idx * 97)
             for sample_idx in range(args.samples_per_font):
-                text = text_sampler.sample(rng).text
-                image = render_training_image(record["path"], text, rng)
+                sample = text_sampler.sample(rng)
+                image = render_training_image(
+                    record["file_path"],
+                    sample.text,
+                    rng,
+                    style=sample_style(rng, sample.kind, record),
+                    face_index=int(record.get("face_index", 0)),
+                )
                 tensor = image_to_tensor(image).unsqueeze(0).to(device)
                 vector = model(tensor).cpu().numpy()[0]
                 vectors.append(vector)

@@ -3,10 +3,11 @@ from __future__ import annotations
 import argparse
 import json
 import time
+import warnings
 from pathlib import Path
 
 from .config import AIPaths, resolve_path
-from .dataset import FontRenderDataset, read_texts, scan_font_records, write_metadata
+from .dataset import FontRenderDataset, read_texts, scan_font_records, write_metadata, summarize_labels
 from .deps import DataLoader, F, torch, require_torch
 from .logging import JsonlLogger
 from .texts import TextSampler
@@ -16,6 +17,7 @@ def train(args: argparse.Namespace) -> None:
     require_torch()
     from .model import create_model
 
+    warnings.filterwarnings("ignore", category=FutureWarning)
     if args.torch_threads > 0:
         torch.set_num_threads(args.torch_threads)
     if args.torch_interop_threads > 0:
@@ -39,10 +41,9 @@ def train(args: argparse.Namespace) -> None:
             "fixed_text_count": len(fixed_texts),
             "text_sampler_preview": text_sampler.preview(),
             "scan_probe_texts": text_sampler.probe_texts(),
+            "record_count": 0,
         }
     )
-    paths.train_config.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
-
     logger.emit({"event": "font_scan_start", "fonts_dir": str(fonts_dir), "limit_fonts": args.limit_fonts})
     records = scan_font_records(
         fonts_dir,
@@ -53,29 +54,39 @@ def train(args: argparse.Namespace) -> None:
     )
     if not records:
         raise RuntimeError("no trainable fonts found")
+    config["label_summary"] = summarize_labels(records)
+    config["record_count"] = len(records)
+    paths.train_config.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
 
     dataset = FontRenderDataset(records, text_sampler, samples_per_font=args.samples_per_font, seed=args.seed)
+    drop_last = len(dataset) >= args.batch_size
     loader = DataLoader(
         dataset,
         batch_size=args.batch_size,
         shuffle=True,
         num_workers=args.workers,
-        drop_last=True,
+        drop_last=drop_last,
         pin_memory=args.device == "cuda",
         persistent_workers=args.workers > 0,
     )
     device = torch.device(args.device if args.device else ("cuda" if torch.cuda.is_available() else "cpu"))
+    use_amp = device.type == "cuda"
+    if use_amp:
+        torch.backends.cudnn.benchmark = True
     model = create_model(num_classes=len(records)).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
     start_epoch = 0
 
     if args.resume and paths.checkpoint.exists():
         ckpt = torch.load(paths.checkpoint, map_location=device)
         model.load_state_dict(ckpt["model"])
         optimizer.load_state_dict(ckpt["optimizer"])
-        start_epoch = int(ckpt.get("epoch", 0)) + 1
+        start_epoch = int(ckpt.get("epoch", 0))
+        if ckpt.get("epoch_complete", False):
+            start_epoch += 1
 
-    total_batches = len(loader)
+    total_batches = max(1, len(loader))
     total_samples = total_batches * args.batch_size
     total_train_batches = total_batches * max(0, args.epochs - start_epoch)
     logger.emit(
@@ -97,6 +108,7 @@ def train(args: argparse.Namespace) -> None:
             "train_batches_remaining": total_train_batches,
             "fixed_text_count": len(fixed_texts),
             "text_sampler_preview": text_sampler.preview(12),
+            "label_summary": summarize_labels(records),
         }
     )
 
@@ -107,16 +119,21 @@ def train(args: argparse.Namespace) -> None:
         total_loss = 0.0
         epoch_started = time.monotonic()
         optimizer.zero_grad(set_to_none=True)
+        accum_since_step = 0
         for step, (images, labels) in enumerate(loader, start=1):
             images = images.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
-            logits = model(images, labels)
-            loss = F.cross_entropy(logits, labels) / args.grad_accum
-            loss.backward()
+            with torch.cuda.amp.autocast(enabled=use_amp):
+                logits = model(images, labels)
+                loss = F.cross_entropy(logits, labels) / args.grad_accum
+            scaler.scale(loss).backward()
             total_loss += float(loss.item()) * args.grad_accum
+            accum_since_step += 1
             if step % args.grad_accum == 0:
-                optimizer.step()
+                scaler.step(optimizer)
+                scaler.update()
                 optimizer.zero_grad(set_to_none=True)
+                accum_since_step = 0
             completed_batches += 1
             if step % args.log_every == 0:
                 elapsed = max(1e-9, time.monotonic() - train_started)
@@ -138,12 +155,39 @@ def train(args: argparse.Namespace) -> None:
                         "epoch_elapsed_sec": round(time.monotonic() - epoch_started, 1),
                         "elapsed_sec": round(elapsed, 1),
                         "eta_sec": round(eta_seconds, 1),
+                        "label_summary": summarize_labels(records),
                         "cuda": cuda_status(),
                     }
                 )
-        save_checkpoint(paths.checkpoint, model, optimizer, epoch, records, fixed_texts)
+            if args.checkpoint_every > 0 and completed_batches % args.checkpoint_every == 0:
+                save_checkpoint(paths.checkpoint, model, optimizer, epoch, records, fixed_texts, epoch_complete=False, global_step=completed_batches)
+                write_metadata(paths.metadata, records, fixed_texts)
+                logger.emit(
+                    {
+                        "event": "checkpoint_saved",
+                        "epoch": epoch,
+                        "epoch_step": step,
+                        "global_step": completed_batches,
+                        "checkpoint": str(paths.checkpoint),
+                        "elapsed_sec": round(time.monotonic() - train_started, 1),
+                    }
+                )
+        if accum_since_step > 0:
+            scaler.step(optimizer)
+            scaler.update()
+            optimizer.zero_grad(set_to_none=True)
+        save_checkpoint(paths.checkpoint, model, optimizer, epoch, records, fixed_texts, epoch_complete=True, global_step=completed_batches)
         write_metadata(paths.metadata, records, fixed_texts)
-        logger.emit({"event": "checkpoint_saved", "epoch": epoch, "checkpoint": str(paths.checkpoint), "elapsed_sec": round(time.monotonic() - train_started, 1)})
+        logger.emit(
+            {
+                "event": "checkpoint_saved",
+                "epoch": epoch,
+                "epoch_step": total_batches,
+                "global_step": completed_batches,
+                "checkpoint": str(paths.checkpoint),
+                "elapsed_sec": round(time.monotonic() - train_started, 1),
+            }
+        )
 
 
 def cuda_status() -> dict:
@@ -158,13 +202,24 @@ def cuda_status() -> dict:
     }
 
 
-def save_checkpoint(path: Path, model, optimizer, epoch: int, records: list[dict], texts: list[str]) -> None:
+def save_checkpoint(
+    path: Path,
+    model,
+    optimizer,
+    epoch: int,
+    records: list[dict],
+    texts: list[str],
+    epoch_complete: bool,
+    global_step: int,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(
         {
             "model": model.state_dict(),
             "optimizer": optimizer.state_dict(),
             "epoch": epoch,
+            "epoch_complete": epoch_complete,
+            "global_step": global_step,
             "num_classes": len(records),
             "records": records,
             "texts": texts,
@@ -193,6 +248,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--log-every", type=int, default=25)
     parser.add_argument("--scan-log-every", type=int, default=100)
+    parser.add_argument("--checkpoint-every", type=int, default=500)
     return parser.parse_args()
 
 

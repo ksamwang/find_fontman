@@ -9,6 +9,7 @@ param(
     [int]$IndexSamplesPerFont = 16,
     [int]$LogEvery = 25,
     [int]$ScanLogEvery = 100,
+    [int]$CheckpointEvery = 500,
     [int]$LimitFonts = 0,
     [string]$Fonts = "fonts",
     [string]$Output = "training\output",
@@ -234,7 +235,8 @@ $trainArgs = @(
     "--torch-interop-threads", "$TorchInteropThreads",
     "--device", $Device,
     "--log-every", "$LogEvery",
-    "--scan-log-every", "$ScanLogEvery"
+    "--scan-log-every", "$ScanLogEvery",
+    "--checkpoint-every", "$CheckpointEvery"
 )
 
 if ($Resume) {
