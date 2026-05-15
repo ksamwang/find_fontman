@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from contextlib import nullcontext
 
 from .config import EMBED_DIM
 from .deps import F, nn, torch
@@ -50,16 +51,18 @@ class ArcFaceHead(nn.Module):
         self.mm = math.sin(math.pi - margin) * margin
 
     def forward(self, embeddings, labels):
-        embeddings = embeddings.float()
-        weight = self.weight.float()
-        cosine = F.linear(F.normalize(embeddings, eps=1e-6), F.normalize(weight, eps=1e-6))
-        cosine = cosine.clamp(-1.0 + 1e-4, 1.0 - 1e-4)
-        sine = torch.sqrt((1.0 - cosine.square()).clamp_min(1e-6))
-        target = cosine * self.cos_m - sine * self.sin_m
-        target = torch.where(cosine > self.threshold, target, cosine - self.mm)
-        one_hot = F.one_hot(labels, num_classes=cosine.size(1)).to(dtype=cosine.dtype, device=cosine.device)
-        logits = cosine * (1.0 - one_hot) + target * one_hot
-        return logits * self.scale
+        context = torch.cuda.amp.autocast(enabled=False) if embeddings.is_cuda else nullcontext()
+        with context:
+            embeddings = embeddings.float()
+            weight = self.weight.float()
+            cosine = F.linear(F.normalize(embeddings, eps=1e-6), F.normalize(weight, eps=1e-6))
+            cosine = cosine.clamp(-1.0 + 1e-4, 1.0 - 1e-4)
+            sine = torch.sqrt((1.0 - cosine.square()).clamp_min(1e-6))
+            target = cosine * self.cos_m - sine * self.sin_m
+            target = torch.where(cosine > self.threshold, target, cosine - self.mm)
+            one_hot = F.one_hot(labels, num_classes=cosine.size(1)).to(dtype=cosine.dtype, device=cosine.device)
+            logits = cosine * (1.0 - one_hot) + target * one_hot
+            return logits * self.scale
 
 
 class FontEmbeddingModel(nn.Module):

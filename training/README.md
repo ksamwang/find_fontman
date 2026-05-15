@@ -21,7 +21,7 @@ Defaults:
 - text source: built-in common word list plus seeded templates for names, companies, industries, promos, numbers, and Chinese/English mixed text
 - sampling: balanced by font family/style/weight, with hard-negative tail samples controlled by `-HardNegativeRatio` / `--hard-negative-ratio`
 - workers: recreated at each epoch boundary so synthetic augmentation changes between epochs even when `-Workers` is greater than zero
-- stability: ArcFace logits avoid `acos()` under AMP, gradients are clipped by `-GradClip` / `--grad-clip`, and non-finite loss or gradients abort before checkpointing
+- stability: ArcFace logits avoid `acos()` under AMP, A100-class GPUs default to BF16 with `-AmpDtype auto`, gradients are clipped by `-GradClip`, and isolated non-finite steps are skipped instead of stopping the run
 
 Quick smoke test:
 

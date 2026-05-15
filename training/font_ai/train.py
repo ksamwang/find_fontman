@@ -80,12 +80,14 @@ def train(args: argparse.Namespace) -> None:
     )
     if len(loader) == 0:
         raise RuntimeError("training loader is empty; reduce batch size or increase samples/fonts")
-    use_amp = device.type == "cuda"
+    amp_dtype = resolve_amp_dtype(args.amp_dtype, device)
+    use_amp = amp_dtype is not None
     if use_amp:
         torch.backends.cudnn.benchmark = True
     model = create_model(num_classes=len(records)).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
-    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
+    use_grad_scaler = amp_dtype == torch.float16
+    scaler = torch.cuda.amp.GradScaler(enabled=use_grad_scaler)
     start_epoch = 0
     resume_replaying_epoch = False
     resumed_global_step = 0
@@ -110,12 +112,15 @@ def train(args: argparse.Namespace) -> None:
             "event": "train_start",
             "device": str(device),
             "cuda": cuda_status(),
+            "amp_dtype": str(amp_dtype).replace("torch.", "") if amp_dtype is not None else "none",
+            "grad_scaler": use_grad_scaler,
             "fonts": len(records),
             "samples_per_font": args.samples_per_font,
             "dataset_samples": len(dataset),
             "batch_size": args.batch_size,
             "grad_accum": args.grad_accum,
             "grad_clip": args.grad_clip,
+            "max_skipped_steps": args.max_skipped_steps,
             "workers": args.workers,
             "torch_threads": torch.get_num_threads(),
             "torch_interop_threads": torch.get_num_interop_threads(),
@@ -148,48 +153,93 @@ def train(args: argparse.Namespace) -> None:
     )
 
     train_started = time.monotonic()
+    skipped_optimizer_steps = 0
+    consecutive_skipped_optimizer_steps = 0
     for epoch in range(start_epoch, args.epochs):
         dataset.set_epoch(epoch)
         model.train()
         total_loss = 0.0
+        finite_loss_steps = 0
         epoch_started = time.monotonic()
         optimizer.zero_grad(set_to_none=True)
         accum_since_step = 0
         for step, (images, labels) in enumerate(loader, start=1):
             images = images.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
-            with torch.cuda.amp.autocast(enabled=use_amp):
+            with torch.cuda.amp.autocast(enabled=use_amp, dtype=amp_dtype):
                 logits = model(images, labels)
                 loss = F.cross_entropy(logits, labels) / args.grad_accum
             if not torch.isfinite(loss).all():
+                skipped_optimizer_steps += 1
+                consecutive_skipped_optimizer_steps += 1
                 logger.emit(
                     {
-                        "event": "nonfinite_loss",
+                        "event": "optimizer_step_skipped",
+                        "reason": "nonfinite_loss",
                         "epoch": epoch,
                         "epoch_step": step,
                         "global_step": completed_batches,
+                        "loss": float(loss.detach().cpu()),
+                        "skipped_optimizer_steps": skipped_optimizer_steps,
+                        "consecutive_skipped_optimizer_steps": consecutive_skipped_optimizer_steps,
                     }
                 )
-                raise RuntimeError(f"non-finite loss at epoch {epoch} step {step}; aborting before checkpoint")
-            scaler.scale(loss).backward()
+                optimizer.zero_grad(set_to_none=True)
+                accum_since_step = 0
+                completed_batches += 1
+                if consecutive_skipped_optimizer_steps >= args.max_skipped_steps:
+                    raise RuntimeError(
+                        f"non-finite values for {consecutive_skipped_optimizer_steps} consecutive optimizer steps; aborting before checkpoint"
+                    )
+                continue
+            if use_grad_scaler:
+                scaler.scale(loss).backward()
+            else:
+                loss.backward()
             total_loss += float(loss.item()) * args.grad_accum
+            finite_loss_steps += 1
             accum_since_step += 1
             if step % args.grad_accum == 0:
-                scaler.unscale_(optimizer)
+                if use_grad_scaler:
+                    scaler.unscale_(optimizer)
                 grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
-                if not torch.isfinite(grad_norm):
+                finite_grad = torch.isfinite(grad_norm)
+                if finite_grad:
+                    if use_grad_scaler:
+                        scaler.step(optimizer)
+                        scaler.update()
+                    else:
+                        optimizer.step()
+                    consecutive_skipped_optimizer_steps = 0
+                else:
+                    skipped_optimizer_steps += 1
+                    consecutive_skipped_optimizer_steps += 1
+                    if use_grad_scaler:
+                        previous_scale = scaler.get_scale()
+                        scaler.step(optimizer)
+                        scaler.update()
+                        amp_scale_after = scaler.get_scale()
+                    else:
+                        previous_scale = None
+                        amp_scale_after = None
                     logger.emit(
                         {
-                            "event": "nonfinite_gradient",
+                            "event": "optimizer_step_skipped",
+                            "reason": "nonfinite_gradient",
                             "epoch": epoch,
                             "epoch_step": step,
                             "global_step": completed_batches,
                             "grad_norm": float(grad_norm),
+                            "amp_scale_before": previous_scale,
+                            "amp_scale_after": amp_scale_after,
+                            "skipped_optimizer_steps": skipped_optimizer_steps,
+                            "consecutive_skipped_optimizer_steps": consecutive_skipped_optimizer_steps,
                         }
                     )
-                    raise RuntimeError(f"non-finite gradient at epoch {epoch} step {step}; aborting before checkpoint")
-                scaler.step(optimizer)
-                scaler.update()
+                    if consecutive_skipped_optimizer_steps >= args.max_skipped_steps:
+                        raise RuntimeError(
+                            f"non-finite values for {consecutive_skipped_optimizer_steps} consecutive optimizer steps; aborting before checkpoint"
+                        )
                 optimizer.zero_grad(set_to_none=True)
                 accum_since_step = 0
             completed_batches += 1
@@ -206,7 +256,7 @@ def train(args: argparse.Namespace) -> None:
                         "epoch_step": step,
                         "epoch_batches": total_batches,
                         "progress_pct": round(100.0 * completed_batches / max(1, total_train_batches), 3),
-                        "loss": total_loss / step,
+                        "loss": total_loss / max(1, finite_loss_steps),
                         "samples_seen": samples_seen,
                         "total_samples": samples_per_epoch * args.epochs,
                         "samples_per_sec": round(min(run_batches * args.batch_size, samples_per_epoch * max(1, args.epochs - start_epoch)) / elapsed, 2),
@@ -217,6 +267,7 @@ def train(args: argparse.Namespace) -> None:
                         "label_summary": summarize_labels(records),
                         "coverage_summary": coverage_summary(records),
                         "hard_negative_ratio": args.hard_negative_ratio,
+                        "skipped_optimizer_steps": skipped_optimizer_steps,
                         "cuda": cuda_status(),
                     }
                 )
@@ -234,21 +285,46 @@ def train(args: argparse.Namespace) -> None:
                     }
                 )
         if accum_since_step > 0:
-            scaler.unscale_(optimizer)
+            if use_grad_scaler:
+                scaler.unscale_(optimizer)
             grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
-            if not torch.isfinite(grad_norm):
+            finite_grad = torch.isfinite(grad_norm)
+            if finite_grad:
+                if use_grad_scaler:
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    optimizer.step()
+                consecutive_skipped_optimizer_steps = 0
+            else:
+                skipped_optimizer_steps += 1
+                consecutive_skipped_optimizer_steps += 1
+                if use_grad_scaler:
+                    previous_scale = scaler.get_scale()
+                    scaler.step(optimizer)
+                    scaler.update()
+                    amp_scale_after = scaler.get_scale()
+                else:
+                    previous_scale = None
+                    amp_scale_after = None
                 logger.emit(
                     {
-                        "event": "nonfinite_gradient",
+                        "event": "optimizer_step_skipped",
+                        "reason": "nonfinite_gradient",
                         "epoch": epoch,
                         "epoch_step": total_batches,
                         "global_step": completed_batches,
                         "grad_norm": float(grad_norm),
+                        "amp_scale_before": previous_scale,
+                        "amp_scale_after": amp_scale_after,
+                        "skipped_optimizer_steps": skipped_optimizer_steps,
+                        "consecutive_skipped_optimizer_steps": consecutive_skipped_optimizer_steps,
                     }
                 )
-                raise RuntimeError(f"non-finite gradient at epoch {epoch} final accumulation; aborting before checkpoint")
-            scaler.step(optimizer)
-            scaler.update()
+                if consecutive_skipped_optimizer_steps >= args.max_skipped_steps:
+                    raise RuntimeError(
+                        f"non-finite values for {consecutive_skipped_optimizer_steps} consecutive optimizer steps; aborting before checkpoint"
+                    )
             optimizer.zero_grad(set_to_none=True)
         save_checkpoint(paths.checkpoint, model, optimizer, epoch, records, fixed_texts, epoch_complete=True, global_step=completed_batches)
         write_metadata(paths.metadata, records, fixed_texts)
@@ -274,6 +350,18 @@ def cuda_status() -> dict:
         "memory_allocated_mb": round(torch.cuda.memory_allocated(idx) / 1024 / 1024, 1),
         "memory_reserved_mb": round(torch.cuda.memory_reserved(idx) / 1024 / 1024, 1),
     }
+
+
+def resolve_amp_dtype(value: str, device) -> object | None:
+    if device.type != "cuda" or value == "none":
+        return None
+    if value == "float16":
+        return torch.float16
+    if value == "bfloat16":
+        return torch.bfloat16
+    if value == "auto" and hasattr(torch.cuda, "is_bf16_supported") and torch.cuda.is_bf16_supported():
+        return torch.bfloat16
+    return torch.float16
 
 
 def save_checkpoint(
@@ -328,6 +416,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint-every", type=int, default=500)
     parser.add_argument("--hard-negative-ratio", type=float, default=0.25)
     parser.add_argument("--grad-clip", type=float, default=5.0)
+    parser.add_argument("--max-skipped-steps", type=int, default=20)
+    parser.add_argument("--amp-dtype", choices=["auto", "bfloat16", "float16", "none"], default="auto")
     return parser.parse_args()
 
 

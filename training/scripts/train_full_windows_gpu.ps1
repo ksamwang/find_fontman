@@ -14,6 +14,9 @@ param(
     [double]$Lr = 3e-4,
     [double]$HardNegativeRatio = 0.25,
     [double]$GradClip = 5.0,
+    [int]$MaxSkippedSteps = 20,
+    [ValidateSet("auto", "bfloat16", "float16", "none")]
+    [string]$AmpDtype = "auto",
     [string]$Fonts = "fonts",
     [string]$Output = "training\output",
     [string]$Texts = "training\texts\zh_common.txt",
@@ -226,6 +229,8 @@ Write-Host "Workers: $Workers"
 Write-Host "Learning rate: $lrText"
 Write-Host "Hard negative ratio: $hardNegativeRatioText"
 Write-Host "Gradient clip: $gradClipText"
+Write-Host "Max skipped optimizer steps: $MaxSkippedSteps"
+Write-Host "AMP dtype: $AmpDtype"
 Write-Host ""
 
 $trainArgs = @(
@@ -248,7 +253,9 @@ $trainArgs = @(
     "--scan-log-every", "$ScanLogEvery",
     "--checkpoint-every", "$CheckpointEvery",
     "--hard-negative-ratio", $hardNegativeRatioText,
-    "--grad-clip", $gradClipText
+    "--grad-clip", $gradClipText,
+    "--max-skipped-steps", "$MaxSkippedSteps",
+    "--amp-dtype", $AmpDtype
 )
 
 if ($Resume) {
