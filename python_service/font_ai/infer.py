@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import json
 import base64
-import hashlib
 import io
 from pathlib import Path
 from typing import Any
@@ -42,7 +40,7 @@ class FontEmbeddingMatcher:
         model.eval()
         self.device = device
         self.model = model
-        self.records = metadata["fonts"]
+        self.records = [self._normalize_record(record) for record in metadata["fonts"]]
         self.embeddings = index["embeddings"].astype(np.float32)
         self.available = True
 
@@ -50,17 +48,23 @@ class FontEmbeddingMatcher:
         if not self.available:
             raise RuntimeError("font embedding model or index is not available")
         query = self.embed_image(image)
-        scores = self.embeddings @ query
+        candidate_indices = self._candidate_indices(text)
+        if not candidate_indices:
+            candidate_indices = list(range(len(self.records)))
+        candidate_embeddings = self.embeddings[candidate_indices]
+        scores = candidate_embeddings @ query
         order = np.argsort(-scores)[: max(top_k, top_n)]
+        ranked_indices = [int(candidate_indices[int(i)]) for i in order]
+        score_map = {int(candidate_indices[int(i)]): float(scores[int(i)]) for i in order}
         results = []
-        for idx in order[:top_k]:
+        for idx in ranked_indices[:top_k]:
             record = self.records[int(idx)]
             results.append(
                 {
                     "font_name": record["name"],
                     "font_path": record["path"],
-                    "score_total": float(scores[int(idx)]),
-                    "embedding_score": float(scores[int(idx)]),
+                    "score_total": score_map[int(idx)],
+                    "embedding_score": score_map[int(idx)],
                     "match_mode": "embedding",
                     "preview_path": "",
                     "preview_base64": self.preview_base64(record["path"], text),
@@ -69,11 +73,11 @@ class FontEmbeddingMatcher:
             )
         return {
             "results": results,
-            "candidate_size": int(len(self.records)),
+            "candidate_size": int(len(candidate_indices)),
             "elapsed_ms": 0,
             "warning": "",
             "match_mode": "embedding",
-            "top_indices": [int(i) for i in order[:top_n]],
+            "top_indices": ranked_indices[:top_n],
         }
 
     def embed_image(self, image):
@@ -99,3 +103,34 @@ class FontEmbeddingMatcher:
             return base64.b64encode(buf.getvalue()).decode("ascii")
         except Exception:
             return ""
+
+    def _candidate_indices(self, text: str) -> list[int]:
+        kind = classify_text(text)
+        if kind == "cjk":
+            return [idx for idx, record in enumerate(self.records) if font_scope(record["path"]) in {"zh_simplified", "zh_traditional"}]
+        if kind == "english":
+            return [idx for idx, record in enumerate(self.records) if font_scope(record["path"]) == "english"]
+        return list(range(len(self.records)))
+
+    def _normalize_record(self, record: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(record)
+        normalized["category"] = font_scope(str(normalized.get("path", "")))
+        return normalized
+
+
+def font_scope(path: str) -> str:
+    parts = Path(path).parts
+    for part in parts:
+        if "\u4e2d\u6587\u7b80\u4f53" in part:
+            return "zh_simplified"
+        if "\u4e2d\u6587\u7e41\u9ad4" in part:
+            return "zh_traditional"
+        if "\u82f1\u6587" in part:
+            return "english"
+    return "unknown"
+
+
+def classify_text(text: str) -> str:
+    if any("\u4e00" <= ch <= "\u9fff" for ch in text):
+        return "cjk"
+    return "english"
