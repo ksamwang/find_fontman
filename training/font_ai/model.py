@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from .config import EMBED_DIM
 from .deps import F, nn, torch
 
@@ -21,7 +23,7 @@ class SmallFontCNN(nn.Module):
         x = self.features(x)
         x = self.pool(x).flatten(1)
         x = self.proj(x)
-        return F.normalize(x, dim=1)
+        return F.normalize(x, dim=1, eps=1e-6)
 
 
 def block(in_channels: int, out_channels: int, stride: int):
@@ -42,13 +44,20 @@ class ArcFaceHead(nn.Module):
         nn.init.xavier_uniform_(self.weight)
         self.scale = scale
         self.margin = margin
+        self.cos_m = math.cos(margin)
+        self.sin_m = math.sin(margin)
+        self.threshold = math.cos(math.pi - margin)
+        self.mm = math.sin(math.pi - margin) * margin
 
     def forward(self, embeddings, labels):
-        cosine = F.linear(F.normalize(embeddings), F.normalize(self.weight))
-        cosine = cosine.clamp(-1.0 + 1e-7, 1.0 - 1e-7)
-        theta = torch.acos(cosine)
-        target = torch.cos(theta + self.margin)
-        one_hot = F.one_hot(labels, num_classes=cosine.size(1)).float()
+        embeddings = embeddings.float()
+        weight = self.weight.float()
+        cosine = F.linear(F.normalize(embeddings, eps=1e-6), F.normalize(weight, eps=1e-6))
+        cosine = cosine.clamp(-1.0 + 1e-4, 1.0 - 1e-4)
+        sine = torch.sqrt((1.0 - cosine.square()).clamp_min(1e-6))
+        target = cosine * self.cos_m - sine * self.sin_m
+        target = torch.where(cosine > self.threshold, target, cosine - self.mm)
+        one_hot = F.one_hot(labels, num_classes=cosine.size(1)).to(dtype=cosine.dtype, device=cosine.device)
         logits = cosine * (1.0 - one_hot) + target * one_hot
         return logits * self.scale
 

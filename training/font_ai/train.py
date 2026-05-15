@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import time
 import warnings
 from pathlib import Path
@@ -114,6 +115,7 @@ def train(args: argparse.Namespace) -> None:
             "dataset_samples": len(dataset),
             "batch_size": args.batch_size,
             "grad_accum": args.grad_accum,
+            "grad_clip": args.grad_clip,
             "workers": args.workers,
             "torch_threads": torch.get_num_threads(),
             "torch_interop_threads": torch.get_num_interop_threads(),
@@ -159,10 +161,33 @@ def train(args: argparse.Namespace) -> None:
             with torch.cuda.amp.autocast(enabled=use_amp):
                 logits = model(images, labels)
                 loss = F.cross_entropy(logits, labels) / args.grad_accum
+            if not torch.isfinite(loss).all():
+                logger.emit(
+                    {
+                        "event": "nonfinite_loss",
+                        "epoch": epoch,
+                        "epoch_step": step,
+                        "global_step": completed_batches,
+                    }
+                )
+                raise RuntimeError(f"non-finite loss at epoch {epoch} step {step}; aborting before checkpoint")
             scaler.scale(loss).backward()
             total_loss += float(loss.item()) * args.grad_accum
             accum_since_step += 1
             if step % args.grad_accum == 0:
+                scaler.unscale_(optimizer)
+                grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+                if not torch.isfinite(grad_norm):
+                    logger.emit(
+                        {
+                            "event": "nonfinite_gradient",
+                            "epoch": epoch,
+                            "epoch_step": step,
+                            "global_step": completed_batches,
+                            "grad_norm": float(grad_norm),
+                        }
+                    )
+                    raise RuntimeError(f"non-finite gradient at epoch {epoch} step {step}; aborting before checkpoint")
                 scaler.step(optimizer)
                 scaler.update()
                 optimizer.zero_grad(set_to_none=True)
@@ -209,6 +234,19 @@ def train(args: argparse.Namespace) -> None:
                     }
                 )
         if accum_since_step > 0:
+            scaler.unscale_(optimizer)
+            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+            if not torch.isfinite(grad_norm):
+                logger.emit(
+                    {
+                        "event": "nonfinite_gradient",
+                        "epoch": epoch,
+                        "epoch_step": total_batches,
+                        "global_step": completed_batches,
+                        "grad_norm": float(grad_norm),
+                    }
+                )
+                raise RuntimeError(f"non-finite gradient at epoch {epoch} final accumulation; aborting before checkpoint")
             scaler.step(optimizer)
             scaler.update()
             optimizer.zero_grad(set_to_none=True)
@@ -249,19 +287,22 @@ def save_checkpoint(
     global_step: int,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(
-        {
-            "model": model.state_dict(),
-            "optimizer": optimizer.state_dict(),
-            "epoch": epoch,
-            "epoch_complete": epoch_complete,
-            "global_step": global_step,
-            "num_classes": len(records),
-            "records": records,
-            "texts": texts,
-        },
-        path,
-    )
+    payload = {
+        "model": model.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "epoch": epoch,
+        "epoch_complete": epoch_complete,
+        "global_step": global_step,
+        "num_classes": len(records),
+        "records": records,
+        "texts": texts,
+    }
+    tmp_path = path.with_name(path.name + ".tmp")
+    backup_path = path.with_name(path.name + ".bak")
+    torch.save(payload, tmp_path)
+    if path.exists():
+        shutil.copy2(path, backup_path)
+    tmp_path.replace(path)
 
 
 def parse_args() -> argparse.Namespace:
@@ -286,6 +327,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--scan-log-every", type=int, default=100)
     parser.add_argument("--checkpoint-every", type=int, default=500)
     parser.add_argument("--hard-negative-ratio", type=float, default=0.25)
+    parser.add_argument("--grad-clip", type=float, default=5.0)
     return parser.parse_args()
 
 

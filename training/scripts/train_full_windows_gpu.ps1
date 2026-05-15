@@ -11,7 +11,9 @@ param(
     [int]$ScanLogEvery = 100,
     [int]$CheckpointEvery = 500,
     [int]$LimitFonts = 0,
+    [double]$Lr = 3e-4,
     [double]$HardNegativeRatio = 0.25,
+    [double]$GradClip = 5.0,
     [string]$Fonts = "fonts",
     [string]$Output = "training\output",
     [string]$Texts = "training\texts\zh_common.txt",
@@ -158,7 +160,9 @@ $venvPython = Join-Path $venv "Scripts\python.exe"
 $fontPath = (Resolve-Path $Fonts).Path
 $outputPath = if ([IO.Path]::IsPathRooted($Output)) { $Output } else { Join-Path $root $Output }
 $requirements = Join-Path $trainingRoot "requirements.txt"
+$lrText = $Lr.ToString([Globalization.CultureInfo]::InvariantCulture)
 $hardNegativeRatioText = $HardNegativeRatio.ToString([Globalization.CultureInfo]::InvariantCulture)
+$gradClipText = $GradClip.ToString([Globalization.CultureInfo]::InvariantCulture)
 
 if (-not (Test-Path $venvPython)) {
     $pythonCommand = Find-Python
@@ -219,7 +223,9 @@ Write-Host "Samples/font: $SamplesPerFont"
 Write-Host "Epochs: $Epochs"
 Write-Host "Batch size: $BatchSize"
 Write-Host "Workers: $Workers"
+Write-Host "Learning rate: $lrText"
 Write-Host "Hard negative ratio: $hardNegativeRatioText"
+Write-Host "Gradient clip: $gradClipText"
 Write-Host ""
 
 $trainArgs = @(
@@ -236,11 +242,13 @@ $trainArgs = @(
     "--workers", "$Workers",
     "--torch-threads", "$TorchThreads",
     "--torch-interop-threads", "$TorchInteropThreads",
+    "--lr", $lrText,
     "--device", $Device,
     "--log-every", "$LogEvery",
     "--scan-log-every", "$ScanLogEvery",
     "--checkpoint-every", "$CheckpointEvery",
-    "--hard-negative-ratio", $hardNegativeRatioText
+    "--hard-negative-ratio", $hardNegativeRatioText,
+    "--grad-clip", $gradClipText
 )
 
 if ($Resume) {
