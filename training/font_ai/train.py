@@ -7,7 +7,7 @@ import warnings
 from pathlib import Path
 
 from .config import AIPaths, resolve_path
-from .dataset import FontRenderDataset, balanced_family_order, coverage_summary, read_texts, scan_font_records, write_metadata, summarize_labels
+from .dataset import FontRenderDataset, coverage_summary, read_texts, scan_font_records, write_metadata, summarize_labels
 from .deps import DataLoader, F, torch, require_torch
 from .logging import JsonlLogger
 from .texts import TextSampler
@@ -58,18 +58,26 @@ def train(args: argparse.Namespace) -> None:
     config["record_count"] = len(records)
     paths.train_config.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    dataset = FontRenderDataset(records, text_sampler, samples_per_font=args.samples_per_font, seed=args.seed)
+    dataset = FontRenderDataset(
+        records,
+        text_sampler,
+        samples_per_font=args.samples_per_font,
+        seed=args.seed,
+        hard_negative_ratio=args.hard_negative_ratio,
+    )
     drop_last = len(dataset) >= args.batch_size
+    device = torch.device(args.device if args.device else ("cuda" if torch.cuda.is_available() else "cpu"))
     loader = DataLoader(
         dataset,
         batch_size=args.batch_size,
         shuffle=False,
         num_workers=args.workers,
         drop_last=drop_last,
-        pin_memory=args.device == "cuda",
+        pin_memory=device.type == "cuda",
         persistent_workers=args.workers > 0,
     )
-    device = torch.device(args.device if args.device else ("cuda" if torch.cuda.is_available() else "cpu"))
+    if len(loader) == 0:
+        raise RuntimeError("training loader is empty; reduce batch size or increase samples/fonts")
     use_amp = device.type == "cuda"
     if use_amp:
         torch.backends.cudnn.benchmark = True
@@ -77,18 +85,24 @@ def train(args: argparse.Namespace) -> None:
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
     start_epoch = 0
+    resume_replaying_epoch = False
+    resumed_global_step = 0
 
     if args.resume and paths.checkpoint.exists():
         ckpt = torch.load(paths.checkpoint, map_location=device)
         model.load_state_dict(ckpt["model"])
         optimizer.load_state_dict(ckpt["optimizer"])
         start_epoch = int(ckpt.get("epoch", 0))
+        resumed_global_step = int(ckpt.get("global_step", 0))
         if ckpt.get("epoch_complete", False):
             start_epoch += 1
+        else:
+            resume_replaying_epoch = True
 
-    total_batches = max(1, len(loader))
-    total_samples = total_batches * args.batch_size
-    total_train_batches = total_batches * max(0, args.epochs - start_epoch)
+    total_batches = len(loader)
+    samples_per_epoch = len(dataset)
+    total_train_batches = total_batches * args.epochs
+    completed_batches = min(start_epoch * total_batches, total_train_batches)
     logger.emit(
         {
             "event": "train_start",
@@ -105,7 +119,11 @@ def train(args: argparse.Namespace) -> None:
             "start_epoch": start_epoch,
             "epochs": args.epochs,
             "batches_per_epoch": total_batches,
-            "train_batches_remaining": total_train_batches,
+            "train_batches_total": total_train_batches,
+            "train_batches_remaining": max(0, total_train_batches - completed_batches),
+            "completed_batches": completed_batches,
+            "resumed_global_step": resumed_global_step,
+            "resume_replaying_epoch": resume_replaying_epoch,
             "fixed_text_count": len(fixed_texts),
             "text_sampler_preview": text_sampler.preview(12),
             "label_summary": summarize_labels(records),
@@ -114,12 +132,12 @@ def train(args: argparse.Namespace) -> None:
         }
     )
 
-    balanced_order = balanced_family_order(records, args.seed, hard_negative_ratio=args.hard_negative_ratio)
     logger.emit(
         {
             "event": "sampling_ready",
-            "balanced_order_size": len(balanced_order),
-            "hard_negative_tail_size": max(0, len(balanced_order) - len(records) * 2),
+            "sample_order_size": len(dataset.order),
+            "base_order_size": len(records) * args.samples_per_font,
+            "hard_negative_tail_size": max(0, len(dataset.order) - len(records) * args.samples_per_font),
             "family_groups": len({record.get("family_name", "unknown") for record in records}),
             "coverage_summary": coverage_summary(records),
             "hard_negative_ratio": args.hard_negative_ratio,
@@ -127,8 +145,8 @@ def train(args: argparse.Namespace) -> None:
     )
 
     train_started = time.monotonic()
-    completed_batches = 0
     for epoch in range(start_epoch, args.epochs):
+        dataset.set_epoch(epoch)
         model.train()
         total_loss = 0.0
         epoch_started = time.monotonic()
@@ -151,8 +169,9 @@ def train(args: argparse.Namespace) -> None:
             completed_batches += 1
             if step % args.log_every == 0:
                 elapsed = max(1e-9, time.monotonic() - train_started)
-                batches_per_sec = completed_batches / elapsed
-                samples_seen = completed_batches * args.batch_size
+                run_batches = max(1, completed_batches - start_epoch * total_batches)
+                batches_per_sec = run_batches / elapsed
+                samples_seen = min(completed_batches * args.batch_size, samples_per_epoch * args.epochs)
                 eta_seconds = max(0, total_train_batches - completed_batches) / max(1e-9, batches_per_sec)
                 logger.emit(
                     {
@@ -163,8 +182,8 @@ def train(args: argparse.Namespace) -> None:
                         "progress_pct": round(100.0 * completed_batches / max(1, total_train_batches), 3),
                         "loss": total_loss / step,
                         "samples_seen": samples_seen,
-                        "total_samples": total_samples * max(0, args.epochs - start_epoch),
-                        "samples_per_sec": round(samples_seen / elapsed, 2),
+                        "total_samples": samples_per_epoch * args.epochs,
+                        "samples_per_sec": round(min(run_batches * args.batch_size, samples_per_epoch * max(1, args.epochs - start_epoch)) / elapsed, 2),
                         "batches_per_sec": round(batches_per_sec, 3),
                         "epoch_elapsed_sec": round(time.monotonic() - epoch_started, 1),
                         "elapsed_sec": round(elapsed, 1),

@@ -19,6 +19,7 @@ Defaults:
 - epochs: `8`
 - device: `cuda`
 - text source: built-in common word list plus seeded templates for names, companies, industries, promos, numbers, and Chinese/English mixed text
+- sampling: balanced by font family/style/weight, with hard-negative tail samples controlled by `-HardNegativeRatio` / `--hard-negative-ratio`
 
 Quick smoke test:
 
@@ -31,6 +32,8 @@ Resume training:
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\training\scripts\train_full_windows_gpu.ps1 -Resume
 ```
+
+Resume is epoch-granular. A checkpoint saved after a complete epoch resumes from the next epoch; a mid-epoch checkpoint restores weights but replays the current epoch so synthetic sampling stays deterministic and balanced.
 
 Export artifacts to the main service:
 

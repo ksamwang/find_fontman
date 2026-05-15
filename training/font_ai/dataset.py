@@ -39,13 +39,24 @@ class FontFaceRecord:
 
 
 class FontRenderDataset(BaseDataset):
-    def __init__(self, font_records: list[dict], text_sampler: TextSampler, samples_per_font: int, seed: int = 7) -> None:
+    def __init__(
+        self,
+        font_records: list[dict],
+        text_sampler: TextSampler,
+        samples_per_font: int,
+        seed: int = 7,
+        hard_negative_ratio: float = 0.25,
+    ) -> None:
         require_torch()
         self.font_records = font_records
         self.text_sampler = text_sampler
         self.samples_per_font = samples_per_font
         self.seed = seed
-        self.order = build_balanced_order(font_records, samples_per_font, seed)
+        self.epoch = 0
+        self.order = build_balanced_order(font_records, samples_per_font, seed, hard_negative_ratio=hard_negative_ratio)
+
+    def set_epoch(self, epoch: int) -> None:
+        self.epoch = epoch
 
     def __len__(self) -> int:
         return len(self.order)
@@ -53,7 +64,7 @@ class FontRenderDataset(BaseDataset):
     def __getitem__(self, idx: int):
         font_idx, sample_idx = self.order[idx]
         record = self.font_records[font_idx]
-        rng = random.Random(self.seed + idx * 9973)
+        rng = random.Random(self.seed + self.epoch * 1_000_003 + idx * 9_973 + sample_idx * 37)
         sample = self.text_sampler.sample(rng, record.get("script_scope", "zh_simplified"))
         style = sample_style(rng, sample.kind, record)
         image = render_training_image(
@@ -82,6 +93,7 @@ def build_balanced_order(records: list[dict], samples_per_font: int, seed: int, 
             rng.shuffle(font_indices)
             for font_idx in font_indices:
                 order.append((font_idx, sample_idx))
+    order.extend(build_hard_negative_tail(records, seed, hard_negative_ratio=hard_negative_ratio, sample_offset=samples_per_font))
     return order
 
 
@@ -97,7 +109,14 @@ def family_bucket(record: dict) -> str:
     )
 
 
-def build_hard_negative_tail(records: list[dict], seed: int, hard_negative_ratio: float = 0.25) -> list[tuple[int, int]]:
+def build_hard_negative_tail(
+    records: list[dict],
+    seed: int,
+    hard_negative_ratio: float = 0.25,
+    sample_offset: int = 0,
+) -> list[tuple[int, int]]:
+    if hard_negative_ratio <= 0:
+        return []
     by_family: dict[str, list[int]] = {}
     by_style: dict[str, list[int]] = {}
     by_weight: dict[str, list[int]] = {}
@@ -107,6 +126,13 @@ def build_hard_negative_tail(records: list[dict], seed: int, hard_negative_ratio
         by_weight.setdefault(str(record.get("weight_name", "unknown")), []).append(idx)
     rng = random.Random(seed + 999)
     tail: list[tuple[int, int]] = []
+    sample_idx = sample_offset
+
+    def append_tail(font_idx: int) -> None:
+        nonlocal sample_idx
+        tail.append((font_idx, sample_idx))
+        sample_idx += 1
+
     families = [name for name, members in by_family.items() if len(members) > 1]
     styles = [name for name, members in by_style.items() if len(members) > 1]
     if families:
@@ -114,20 +140,21 @@ def build_hard_negative_tail(records: list[dict], seed: int, hard_negative_ratio
             members = by_family[family][:]
             rng.shuffle(members)
             for idx in members[: max(1, int(len(members) * hard_negative_ratio))]:
-                tail.append((idx, 0))
+                append_tail(idx)
                 if hard_negative_ratio >= 0.5:
-                    tail.append((idx, 1))
+                    append_tail(idx)
     if styles:
         for style in styles:
             members = by_style[style][:]
             rng.shuffle(members)
             for idx in members[: max(1, int(len(members) * hard_negative_ratio))]:
-                tail.append((idx, 0))
+                append_tail(idx)
     if by_weight:
         for weight, members in by_weight.items():
             if len(members) > 1:
                 rng.shuffle(members)
-                tail.extend((idx, 0) for idx in members[: min(max(1, int(len(members) * hard_negative_ratio)), len(members))])
+                for idx in members[: min(max(1, int(len(members) * hard_negative_ratio)), len(members))]:
+                    append_tail(idx)
     return tail
 
 
@@ -407,5 +434,5 @@ def balanced_family_order(records: list[dict], seed: int, hard_negative_ratio: f
             members = groups[key][:]
             rng.shuffle(members)
             order.extend(members)
-    order.extend(build_hard_negative_tail(records, seed, hard_negative_ratio=hard_negative_ratio))
+    order.extend(idx for idx, _ in build_hard_negative_tail(records, seed, hard_negative_ratio=hard_negative_ratio))
     return order
