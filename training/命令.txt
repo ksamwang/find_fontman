@@ -1,0 +1,14 @@
+# 小规模 smoke
+powershell -NoProfile -ExecutionPolicy Bypass -File .\training\scripts\train_full_windows_gpu.ps1 -LimitFonts 20 -SamplesPerFont 5 -Epochs 1
+
+#quanl
+powershell -NoProfile -ExecutionPolicy Bypass -File .\training\scripts\train_full_windows_gpu.ps1
+
+
+# 恢复训练
+powershell -NoProfile -ExecutionPolicy Bypass -File .\training\scripts\train_full_windows_gpu.ps1  -SkipInstall -Resume 
+# CPU 跑
+powershell -NoProfile -ExecutionPolicy Bypass -File .\training\scripts\train_full_windows_gpu.ps1 -Device cpu
+
+# 训练后导出到主服务 data/font_ai
+powershell -NoProfile -ExecutionPolicy Bypass -File .\training\scripts\train_full_windows_gpu.ps1 -Resume -SkipIndex -ExportToMainData
