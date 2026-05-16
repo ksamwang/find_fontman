@@ -21,6 +21,8 @@ except Exception:  # pragma: no cover
 
 BaseDataset = Dataset if Dataset is not None else object
 FONT_EXTS = {".ttf", ".otf", ".ttc"}
+RANDOM_RENDER_ATTEMPTS = 16
+SAFE_RENDER_ATTEMPTS = 8
 
 
 @dataclass(frozen=True)
@@ -64,17 +66,41 @@ class FontRenderDataset(BaseDataset):
     def __getitem__(self, idx: int):
         font_idx, sample_idx = self.order[idx]
         record = self.font_records[font_idx]
-        rng = random.Random(self.seed + self.epoch * 1_000_003 + idx * 9_973 + sample_idx * 37)
-        sample = self.text_sampler.sample(rng, record.get("script_scope", "zh_simplified"))
-        style = sample_style(rng, sample.kind, record)
-        image = render_training_image(
-            record["file_path"],
-            sample.text,
-            rng,
-            style=style,
-            face_index=int(record.get("face_index", 0)),
-        )
+        base_seed = self.seed + self.epoch * 1_000_003 + idx * 9_973 + sample_idx * 37
+        image = render_record_with_retries(record, self.text_sampler, base_seed)
         return image_to_tensor(image), font_idx
+
+
+def render_record_with_retries(record: dict, text_sampler: TextSampler, base_seed: int):
+    last_error: OSError | None = None
+    total_attempts = RANDOM_RENDER_ATTEMPTS + SAFE_RENDER_ATTEMPTS
+    scope = record.get("script_scope", "zh_simplified")
+    for attempt in range(total_attempts):
+        rng = random.Random(base_seed + attempt * 104_729)
+        if attempt < RANDOM_RENDER_ATTEMPTS:
+            sample = text_sampler.sample(rng, scope)
+            style = sample_style(rng, sample.kind, record)
+            text = sample.text
+        else:
+            text = safe_render_text(scope, attempt - RANDOM_RENDER_ATTEMPTS)
+            style = safe_render_style(attempt - RANDOM_RENDER_ATTEMPTS)
+        try:
+            return render_training_image(
+                record["file_path"],
+                text,
+                rng,
+                style=style,
+                face_index=int(record.get("face_index", 0)),
+            )
+        except OSError as exc:
+            last_error = exc
+            continue
+    raise RuntimeError(
+        "font render failed after retries: "
+        f"name={record.get('name')} family={record.get('family_name')} "
+        f"path={record.get('file_path')} face_index={record.get('face_index', 0)} "
+        f"last_error={last_error}"
+    )
 
 
 def build_balanced_order(records: list[dict], samples_per_font: int, seed: int, hard_negative_ratio: float = 0.25) -> list[tuple[int, int]]:
@@ -167,6 +193,36 @@ def coverage_summary(records: list[dict]) -> dict[str, int]:
         "italic": sum(1 for record in records if record.get("is_italic")),
     }
     return summary
+
+
+def safe_render_text(scope: str, attempt: int) -> str:
+    if scope == "english":
+        texts = ["Font Test", "Sample", "Design", "A"]
+    else:
+        texts = ["字体测试", "样本文字", "中文", "字"]
+    return texts[attempt % len(texts)]
+
+
+def safe_render_style(attempt: int) -> dict:
+    font_sizes = [56, 48, 40, 32, 24, 20, 16, 12]
+    return {
+        "font_size": font_sizes[attempt % len(font_sizes)],
+        "scale_x": 1.0,
+        "scale_y": 1.0,
+        "spacing": 0,
+        "line_gap": 8,
+        "offset_x": 0,
+        "offset_y": 0,
+        "angle": 0.0,
+        "blur_prob": 0.0,
+        "noise_prob": 0.0,
+        "contrast_prob": 0.0,
+        "shadow_prob": 0.0,
+        "stroke_prob": 0.0,
+        "crop_prob": 0.0,
+        "jpeg_prob": 0.0,
+        "align": "center",
+    }
 
 
 def scan_font_records(

@@ -2,15 +2,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import random
 from pathlib import Path
 
 import numpy as np
 
 from .config import AIPaths, resolve_path
-from .dataset import read_metadata, sample_style
+from .dataset import read_metadata, render_record_with_retries
 from .deps import torch, require_torch
-from .synth import render_training_image
 from .texts import TextSampler
 from .transforms import image_to_tensor
 
@@ -40,16 +38,8 @@ def build_index(args: argparse.Namespace) -> None:
     with torch.no_grad():
         for idx, record in enumerate(records):
             vectors = []
-            rng = random.Random(args.seed + idx * 97)
             for sample_idx in range(args.samples_per_font):
-                sample = text_sampler.sample(rng)
-                image = render_training_image(
-                    record["file_path"],
-                    sample.text,
-                    rng,
-                    style=sample_style(rng, sample.kind, record),
-                    face_index=int(record.get("face_index", 0)),
-                )
+                image = render_record_with_retries(record, text_sampler, args.seed + idx * 97 + sample_idx * 10_007)
                 tensor = image_to_tensor(image).unsqueeze(0).to(device)
                 vector = model(tensor).cpu().numpy()[0]
                 vectors.append(vector)
