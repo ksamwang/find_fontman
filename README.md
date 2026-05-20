@@ -83,3 +83,9 @@ Go and C++ callers should use the single-file SDKs under `sdk/` and call the loc
 ```
 
 See `sdk/README.md` for runtime startup and Go/C++ examples.
+
+To zip and publish the current Windows release with GitHub CLI:
+
+```powershell
+.\release.bat
+```
