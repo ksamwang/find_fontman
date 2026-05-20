@@ -73,3 +73,13 @@ Reports:
 
 - `data/benchmark/report.json`
 - `data/benchmark/report.html`
+
+## SDK / Windows Runtime
+
+Go and C++ callers should use the single-file SDKs under `sdk/` and call the local Fontman runtime service. Build a Windows runtime bundle that does not require Python on the target machine:
+
+```powershell
+.\scripts\build_runtime_windows.ps1 -IncludeData -IncludeFonts
+```
+
+See `sdk/README.md` for runtime startup and Go/C++ examples.
