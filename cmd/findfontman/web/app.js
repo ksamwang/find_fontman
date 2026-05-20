@@ -213,6 +213,7 @@ function renderResults(payload) {
     <article class="result-card">
       <strong>${idx + 1}. ${escapeHTML(item.font_name)}</strong>
       <div class="score">Score ${formatScore(item.score_total)} ${item.match_mode ? `(${escapeHTML(item.match_mode)})` : ""}</div>
+      ${fontPathLine(item)}
       ${previewImage(item)}
       <div class="metric-grid">
         <span>Chamfer ${formatScore(item.score_chamfer)}</span>
@@ -225,6 +226,11 @@ function renderResults(payload) {
       </div>
     </article>
   `).join("");
+}
+
+function fontPathLine(item) {
+  if (!item.font_path) return "";
+  return `<div class="font-path" title="${escapeHTML(item.font_path)}">${escapeHTML(item.font_path)}</div>`;
 }
 
 function previewImage(item) {

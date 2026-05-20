@@ -187,6 +187,19 @@ textarea {
   font-weight: 700;
 }
 
+.font-path {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f8fafc;
+  color: var(--muted);
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
 .preview {
   width: 100%;
   min-height: 48px;
