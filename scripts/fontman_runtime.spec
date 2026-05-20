@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_dynamic_libs, collect_submodules
+from PyInstaller.utils.hooks import collect_dynamic_libs
 
 
 root = Path.cwd()
@@ -12,16 +12,21 @@ datas = [
 
 binaries = []
 hiddenimports = []
-for package in ("PIL", "cv2", "numpy", "torch", "torchvision"):
-    hiddenimports += collect_submodules(package)
+for package in ("cv2", "torch"):
     binaries += collect_dynamic_libs(package)
 
-try:
-    hiddenimports += collect_submodules("paddleocr")
-    hiddenimports += collect_submodules("paddle")
-    binaries += collect_dynamic_libs("paddle")
-except Exception:
-    pass
+hiddenimports += [
+    "PIL.Image",
+    "PIL.ImageDraw",
+    "PIL.ImageFilter",
+    "PIL.ImageFont",
+    "PIL.ImageOps",
+    "cv2",
+    "numpy",
+    "torch",
+    "torch.nn",
+    "torch.nn.functional",
+]
 
 
 a = Analysis(
@@ -33,7 +38,18 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=[
+        "paddle",
+        "paddleocr",
+        "torch.distributed",
+        "torch.testing",
+        "torch.utils.tensorboard",
+        "torchvision",
+        "tensorflow",
+        "pandas",
+        "matplotlib",
+        "scipy",
+    ],
     noarchive=False,
     optimize=0,
 )

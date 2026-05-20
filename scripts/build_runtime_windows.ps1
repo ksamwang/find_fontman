@@ -11,11 +11,19 @@ if (!(Test-Path $Python)) {
     $Python = "python"
 }
 
-$pipArgs = @("-m", "pip", "install", "pyinstaller")
-if (![string]::IsNullOrWhiteSpace($PipIndexUrl)) {
-    $pipArgs += @("-i", $PipIndexUrl)
+$oldErrorActionPreference = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+& $Python -m PyInstaller --version *> $null
+$hasPyInstaller = $LASTEXITCODE -eq 0
+$ErrorActionPreference = $oldErrorActionPreference
+
+if (!$hasPyInstaller) {
+    $pipArgs = @("-m", "pip", "install", "pyinstaller")
+    if (![string]::IsNullOrWhiteSpace($PipIndexUrl)) {
+        $pipArgs += @("-i", $PipIndexUrl)
+    }
+    & $Python @pipArgs
 }
-& $Python @pipArgs
 
 & $Python -m PyInstaller --clean --noconfirm .\scripts\fontman_runtime.spec
 

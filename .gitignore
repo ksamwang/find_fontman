@@ -24,6 +24,9 @@ data/
 .venv/
 training/.venv/
 training/output/
+release/
+dist/
+build/
 __pycache__/
 *.pyc
 

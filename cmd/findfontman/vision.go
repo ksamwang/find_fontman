@@ -34,18 +34,7 @@ func (a *App) StartVisionService() error {
 		return nil
 	}
 
-	python := env("PYTHON", filepath.Join(a.Root, ".venv", "Scripts", "python.exe"))
-	if _, err := os.Stat(python); err != nil {
-		python = env("PYTHON_FALLBACK", "python")
-	}
-	script := filepath.Join(a.Root, "python_service", "service.py")
-	cmd := exec.Command(python, script,
-		"--addr", env("VISION_ADDR", defaultVisionAddr),
-		"--root", a.Root,
-		"--fonts", a.FontsDir,
-		"--data", a.DataDir,
-		"--previews", a.PreviewDir,
-	)
+	cmd := a.visionCommand()
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Dir = a.Root
@@ -73,6 +62,26 @@ func (a *App) StartVisionService() error {
 		return fmt.Errorf("python vision service did not become healthy: %w", lastErr)
 	}
 	return errors.New("python vision service did not become healthy")
+}
+
+func (a *App) visionCommand() *exec.Cmd {
+	args := []string{
+		"--addr", env("VISION_ADDR", defaultVisionAddr),
+		"--root", a.Root,
+		"--fonts", a.FontsDir,
+		"--data", a.DataDir,
+		"--previews", a.PreviewDir,
+	}
+	runtimeExe := env("FONTMAN_SERVICE_EXE", filepath.Join(a.Root, "fontman-runtime", "fontman-service.exe"))
+	if _, err := os.Stat(runtimeExe); err == nil {
+		return exec.Command(runtimeExe, args...)
+	}
+	python := env("PYTHON", filepath.Join(a.Root, ".venv", "Scripts", "python.exe"))
+	if _, err := os.Stat(python); err != nil {
+		python = env("PYTHON_FALLBACK", "python")
+	}
+	script := filepath.Join(a.Root, "python_service", "service.py")
+	return exec.Command(python, append([]string{script}, args...)...)
 }
 
 func visionStartTimeout() time.Duration {
